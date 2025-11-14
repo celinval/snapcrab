@@ -1,0 +1,44 @@
+# Continuous Integration workflow for SnapCrab
+#
+# This workflow runs on every push to main and on all pull requests.
+# It builds the workspace, runs tests, and performs linting with clippy
+# to ensure code quality and catch potential issues early.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build, Test, and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Build workspace
+        run: cargo build --verbose
+        
+      - name: Run tests
+        run: cargo test --verbose
+        
+      - name: Run clippy lints
+        run: cargo clippy -- -D warnings
