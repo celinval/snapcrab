@@ -4,7 +4,36 @@
 //! This component executes Rust code without LLVM code generation and linking overhead,
 //! enabling rapid development iteration.
 
-fn main() {
+#![feature(rustc_private)]
+
+extern crate rustc_driver;
+extern crate rustc_interface;
+extern crate rustc_middle;
+extern crate rustc_public;
+
+use rustc_public::{run, CompilerError};
+use std::ops::ControlFlow;
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
     println!("SnapCrab Interpreter v{}", env!("CARGO_PKG_VERSION"));
     println!("Experimental Rust interpreter for fast development iteration");
+
+    let rustc_args: Vec<String> = std::env::args().collect();
+    let result = run!(&rustc_args, start_interpreter);
+    
+    match result {
+        Ok(_) | Err(CompilerError::Skipped | CompilerError::Interrupted(_)) => ExitCode::SUCCESS,
+        _ => ExitCode::FAILURE,
+    }
+}
+
+fn start_interpreter() -> ControlFlow<()> {
+    let crate_name = rustc_public::local_crate().name;
+    eprintln!("--- Interpreting crate: {crate_name}");
+
+    // TODO: Implement MIR interpretation logic
+    eprintln!("--- MIR interpretation not yet implemented");
+    
+    ControlFlow::Break(())
 }
