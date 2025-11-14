@@ -2,7 +2,7 @@
 authors = ["Celina G. Val"]
 language = "en"
 src = "src"
-title = "snapcrab Documentation"
+title = "SnapCrab Documentation"
 
 [build]
 build-dir = "book"

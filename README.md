@@ -1,4 +1,4 @@
-# snapcrab
+# SnapCrab
 Experimental Rust interpreter
 
 An experimental Rust interpreter designed to speed up local development by executing Rust code without compilation and linking overhead.
