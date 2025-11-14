@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "snapcrab",
+    "cargo-snap",
+]
+resolver = "2"
