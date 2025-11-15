@@ -11,6 +11,8 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
+mod runner;
+
 use rustc_public::{run, CompilerError};
 use std::ops::ControlFlow;
 use std::process::ExitCode;
@@ -32,8 +34,12 @@ fn start_interpreter() -> ControlFlow<()> {
     let crate_name = rustc_public::local_crate().name;
     eprintln!("--- Interpreting crate: {crate_name}");
 
-    // TODO: Implement MIR interpretation logic
-    eprintln!("--- MIR interpretation not yet implemented");
+    match runner::run_main() {
+        Ok(exit_code) => {
+            eprintln!("--- Interpretation completed with exit code: {:?}", exit_code);
+        }
+        Err(e) => eprintln!("--- Interpretation failed: {:?}", e),
+    }
     
     ControlFlow::Break(())
 }
