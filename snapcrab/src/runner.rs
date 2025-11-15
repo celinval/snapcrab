@@ -1,16 +1,14 @@
-use rustc_public::{entry_fn, CrateItem};
+use rustc_public::{entry_fn, CrateItem, CrateDef};
 use std::process::ExitCode;
+use anyhow::{Result, bail};
+use tracing::info;
 
-#[derive(Debug)]
-pub enum IntError {
-    UnsupportedOperation(&'static str),
-}
-
-pub fn run_main() -> Result<ExitCode, IntError> {
-    let entry_fn = entry_fn().ok_or(IntError::UnsupportedOperation("No entry function found"))?;
+pub fn run_main() -> Result<ExitCode> {
+    let entry_fn = entry_fn().ok_or_else(|| anyhow::anyhow!("No entry function found"))?;
+    info!("Found entry function: {}", entry_fn.name());
     run(entry_fn)
 }
 
-pub fn run(_entry_fn: CrateItem) -> Result<ExitCode, IntError> {
-    Err(IntError::UnsupportedOperation("All"))
+pub fn run(_entry_fn: CrateItem) -> Result<ExitCode> {
+    bail!("All operations are unsupported")
 }
