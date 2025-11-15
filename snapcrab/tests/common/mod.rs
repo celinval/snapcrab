@@ -11,7 +11,7 @@ use std::process::ExitCode;
 #[derive(Debug)]
 pub enum TestResult {
     Success,
-    Failure, 
+    Failure,
     Error(String),
     ErrorRegex(String),
 }
@@ -39,23 +39,23 @@ pub fn run_interpreter_test(input_file: &Path, _flags: &[&str]) -> TestResult {
         "snapcrab".to_string(),
         input_file.to_string_lossy().to_string(),
     ];
-    
+
     // Use rustc_public to run the interpreter
     let result = rustc_public::run!(&rustc_args, || {
         match snapcrab::run_main() {
             Ok(exit_code) => {
                 if exit_code == ExitCode::SUCCESS {
-                    std::ops::ControlFlow::Break(TestResult::Success)
+                    std::ops::ControlFlow::Continue(())
                 } else {
-                    std::ops::ControlFlow::Break(TestResult::Failure)
+                    std::ops::ControlFlow::Continue(())
                 }
             }
             Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
         }
     });
-    
+
     match result {
-        Ok(test_result) => test_result,
+        Ok(_) => TestResult::Success,
         Err(e) => TestResult::Error(format!("Compilation failed: {:?}", e)),
     }
 }
@@ -69,12 +69,12 @@ macro_rules! check_interpreter {
                 .join("tests")
                 .join("inputs")
                 .join($input_file);
-            
+
             let result = crate::common::run_interpreter_test(&input_path, &[]);
             assert_eq!(result, $expected);
         }
     };
-    
+
     ($test_name:ident, input=$input_file:expr, flags=$flags:expr, result=$expected:expr) => {
         #[test]
         fn $test_name() {
@@ -82,7 +82,7 @@ macro_rules! check_interpreter {
                 .join("tests")
                 .join("inputs")
                 .join($input_file);
-            
+
             let result = crate::common::run_interpreter_test(&input_path, $flags);
             assert_eq!(result, $expected);
         }

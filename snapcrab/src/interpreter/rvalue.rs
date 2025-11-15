@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use crate::stack::Value;
 
 impl super::function::FnInterpreter {
-    pub(super) fn evaluate_rvalue(&mut self, rvalue: &Rvalue) -> Result<Value> {
+    pub(super) fn evaluate_rvalue(&self, rvalue: &Rvalue) -> Result<Value> {
         match rvalue {
             Rvalue::BinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;

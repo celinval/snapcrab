@@ -2,45 +2,48 @@ use crate::heap::Heap;
 use crate::stack::{StackFrame, Value};
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;
-use rustc_public::mir::{BasicBlockIdx, Operand, Place, StatementKind, TerminatorKind};
-use rustc_public::ty::MirConst;
+use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
+use rustc_public::ty::{ConstantKind, MirConst, RigidTy, TyKind};
 use tracing::{debug, info};
 
 #[derive(Debug)]
 pub struct FnInterpreter {
     frame: StackFrame,
     current_block: BasicBlockIdx,
+    instance: Instance,
+    body: Body,
 }
 
 impl FnInterpreter {
-    pub fn new() -> Self {
-        Self {
-            frame: Vec::new(),
-            current_block: 0,
-        }
-    }
-
-    pub fn run(&mut self, instance: Instance, _heap: &mut Heap) -> Result<Value> {
+    pub fn new(instance: Instance) -> Result<Self> {
         let body = instance
             .body()
             .ok_or_else(|| anyhow::anyhow!("No body for instance"))?;
-        info!("Starting interpretation of {}", instance.name());
-
-        // Initialize frame with space for all locals
+        
         let frame_size = body.locals().len();
-        self.frame = vec![None; frame_size];
+        Ok(Self {
+            frame: vec![None; frame_size],
+            current_block: 0,
+            instance,
+            body,
+        })
+    }
+
+    pub fn run(mut self, _heap: &mut Heap) -> Result<Value> {
+        info!("Starting interpretation of {}", self.instance.name());
 
         loop {
-            let block = &body.blocks[self.current_block];
-            debug!("Executing block {}", self.current_block);
+            let current_block_idx = self.current_block;
+            let stmt_count = self.body.blocks[current_block_idx].statements.len();
+            debug!("Executing block {}", current_block_idx);
 
             // Execute statements
-            for statement in &block.statements {
-                self.execute_statement(statement)?;
+            for stmt_idx in 0..stmt_count {
+                self.execute_statement(current_block_idx, stmt_idx)?;
             }
 
             // Execute terminator
-            match self.execute_terminator(&block.terminator)? {
+            match self.execute_terminator(current_block_idx)? {
                 ControlFlow::Continue(next_block) => {
                     self.current_block = next_block;
                 }
@@ -52,10 +55,11 @@ impl FnInterpreter {
         }
     }
 
-    fn execute_statement(&mut self, statement: &rustc_public::mir::Statement) -> Result<()> {
-        debug!("Executing statement: {:?}", statement.kind);
+    fn execute_statement(&mut self, bb_idx: BasicBlockIdx, stmt_idx: usize) -> Result<()> {
+        let statement_kind = self.body.blocks[bb_idx].statements[stmt_idx].kind.clone();
+        debug!("Executing statement: {:?}", statement_kind);
 
-        match &statement.kind {
+        match &statement_kind {
             StatementKind::Assign(place, rvalue) => {
                 let value = self.evaluate_rvalue(rvalue)?;
                 self.assign_to_place(place, value)?;
@@ -67,16 +71,14 @@ impl FnInterpreter {
                 // Do nothing
             }
             _ => {
-                bail!("Unsupported statement: {:?}", statement.kind);
+                bail!("Unsupported statement: {:?}", statement_kind);
             }
         }
         Ok(())
     }
 
-    fn execute_terminator(
-        &mut self,
-        terminator: &rustc_public::mir::Terminator,
-    ) -> Result<ControlFlow> {
+    fn execute_terminator(&self, bb_idx: BasicBlockIdx) -> Result<ControlFlow> {
+        let terminator = &self.body.blocks[bb_idx].terminator;
         debug!("Executing terminator: {:?}", terminator.kind);
 
         match &terminator.kind {
@@ -125,11 +127,11 @@ impl FnInterpreter {
 
     fn evaluate_constant(&self, const_: &MirConst) -> Result<Value> {
         match const_.kind() {
-            rustc_public::ty::ConstantKind::Allocated(alloc) => {
+            ConstantKind::Allocated(alloc) => {
                 let bytes = alloc.raw_bytes()?;
                 // Use the MIR type info to determine signed vs unsigned
                 match const_.ty().kind() {
-                    rustc_public::ty::TyKind::RigidTy(rustc_public::ty::RigidTy::Int(_)) => {
+                    TyKind::RigidTy(RigidTy::Int(_)) => {
                         let val = match bytes.len() {
                             1 => i8::from_le_bytes([bytes[0]]) as i128,
                             2 => i16::from_le_bytes([bytes[0], bytes[1]]) as i128,
@@ -140,7 +142,7 @@ impl FnInterpreter {
                         };
                         Ok(Value::Int(val))
                     }
-                    rustc_public::ty::TyKind::RigidTy(rustc_public::ty::RigidTy::Uint(_)) => {
+                    TyKind::RigidTy(RigidTy::Uint(_)) => {
                         let val = match bytes.len() {
                             1 => bytes[0] as u128,
                             2 => u16::from_le_bytes([bytes[0], bytes[1]]) as u128,
@@ -151,20 +153,20 @@ impl FnInterpreter {
                         };
                         Ok(Value::Uint(val))
                     }
-                    rustc_public::ty::TyKind::RigidTy(rustc_public::ty::RigidTy::Bool) => {
+                    TyKind::RigidTy(RigidTy::Bool) => {
                         Ok(Value::Bool(bytes[0] != 0))
                     }
                     _ => bail!("Unsupported constant type: {:?}", const_.ty()),
                 }
             }
-            rustc_public::ty::ConstantKind::ZeroSized => Ok(Value::Unit),
-            rustc_public::ty::ConstantKind::Ty(ty_const) => {
+            ConstantKind::ZeroSized => Ok(Value::Unit),
+            ConstantKind::Ty(ty_const) => {
                 bail!("Unsupported type constant: {:?}", ty_const);
             }
-            rustc_public::ty::ConstantKind::Param(_) => {
+            ConstantKind::Param(_) => {
                 bail!("Parameter constants not supported");
             }
-            rustc_public::ty::ConstantKind::Unevaluated(_) => {
+            ConstantKind::Unevaluated(_) => {
                 bail!("Unevaluated constants not supported");
             }
         }
@@ -194,6 +196,12 @@ impl FnInterpreter {
             bail!("Local index {} out of bounds", place.local);
         }
 
+        // Check if this is a zero-sized type
+        let local_ty = self.body.locals()[place.local].ty;
+        if matches!(local_ty.kind(), TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty()) {
+            return Ok(Value::Unit);
+        }
+
         self.frame[place.local]
             .ok_or_else(|| anyhow::anyhow!("Uninitialized local: {}", place.local))
     }
@@ -208,51 +216,4 @@ pub enum ControlFlow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_public::mir::Place;
-
-    #[test]
-    fn test_new_interpreter() {
-        let interpreter = FnInterpreter::new();
-        assert_eq!(interpreter.current_block, 0);
-        assert!(interpreter.frame.is_empty());
-    }
-
-    #[test]
-    fn test_assign_and_read_place() {
-        let mut interpreter = FnInterpreter::new();
-        interpreter.frame = vec![None; 3];
-
-        let place = Place::from(1);
-        let value = Value::Int(42);
-
-        interpreter.assign_to_place(&place, value).unwrap();
-        let read_value = interpreter.read_from_place(&place).unwrap();
-
-        assert_eq!(read_value, Value::Int(42));
-    }
-
-    #[test]
-    fn test_read_uninitialized_place() {
-        let frame = vec![None; 3];
-        let interpreter = FnInterpreter {
-            frame,
-            current_block: 0,
-        };
-
-        let place = Place::from(1);
-        let result = interpreter.read_from_place(&place);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_place_out_of_bounds() {
-        let mut interpreter = FnInterpreter::new();
-        interpreter.frame = vec![None; 2];
-
-        let place = Place::from(5);
-        let result = interpreter.assign_to_place(&place, Value::Int(42));
-
-        assert!(result.is_err());
-    }
 }

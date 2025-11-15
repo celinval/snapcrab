@@ -6,9 +6,9 @@ mod common;
 use common::TestResult;
 
 check_interpreter!(
-    test_simple_error,
+    test_simple_success,
     input = "simple_main.rs",
-    result = TestResult::ErrorRegex(r".*Uninitialized local.*".to_string())
+    result = TestResult::Success
 );
 
 check_interpreter!(
