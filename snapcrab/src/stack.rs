@@ -3,7 +3,8 @@ pub type Local = usize;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
-    I32(i32),
+    Int(i128),    // All signed integers
+    Uint(u128),   // All unsigned integers
     Bool(bool),
     Unit,
 }

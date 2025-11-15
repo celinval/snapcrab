@@ -1,4 +1,4 @@
-use rustc_public::mir::{BasicBlockIdx, StatementKind, TerminatorKind, Operand, Place, BinOp, Rvalue};
+use rustc_public::mir::{BasicBlockIdx, StatementKind, TerminatorKind, Operand, Place, BinOp, UnOp, Rvalue};
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::MirConst;
 use anyhow::{Result, bail};
@@ -85,7 +85,8 @@ impl FnInterpreter {
             TerminatorKind::SwitchInt { discr, targets } => {
                 let discr_value = self.evaluate_operand(discr)?;
                 let discr_int = match discr_value {
-                    Value::I32(i) => i as u128,
+                    Value::Int(i) => i as u128,
+                    Value::Uint(u) => u,
                     Value::Bool(b) => if b { 1 } else { 0 },
                     _ => bail!("Cannot switch on non-integer value: {:?}", discr_value),
                 };
@@ -111,6 +112,10 @@ impl FnInterpreter {
                 let right_val = self.evaluate_operand(right)?;
                 self.evaluate_binary_op(*op, left_val, right_val)
             }
+            Rvalue::UnaryOp(op, operand) => {
+                let val = self.evaluate_operand(operand)?;
+                self.evaluate_unary_op(*op, val)
+            }
             Rvalue::Use(operand) => {
                 self.evaluate_operand(operand)
             }
@@ -132,41 +137,150 @@ impl FnInterpreter {
     }
 
     fn evaluate_binary_op(&self, op: BinOp, left: Value, right: Value) -> Result<Value> {
-        match (op, left, right) {
-            (BinOp::Add, Value::I32(l), Value::I32(r)) => Ok(Value::I32(l + r)),
-            (BinOp::Sub, Value::I32(l), Value::I32(r)) => Ok(Value::I32(l - r)),
-            (BinOp::Mul, Value::I32(l), Value::I32(r)) => Ok(Value::I32(l * r)),
-            (BinOp::Div, Value::I32(l), Value::I32(r)) => {
-                if r == 0 {
+        match (left, right) {
+            (Value::Int(l), Value::Int(r)) => self.eval_int_binop(op, l, r),
+            (Value::Uint(l), Value::Uint(r)) => self.eval_uint_binop(op, l, r),
+            (Value::Bool(l), Value::Bool(r)) => self.eval_bool_binop(op, l, r),
+            _ => bail!("Type mismatch in binary operation: {:?} on {:?} and {:?}", op, left, right),
+        }
+    }
+
+    fn eval_int_binop(&self, op: BinOp, left: i128, right: i128) -> Result<Value> {
+        match op {
+            BinOp::Add => left.checked_add(right)
+                .map(Value::Int)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in addition")),
+            BinOp::Sub => left.checked_sub(right)
+                .map(Value::Int)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in subtraction")),
+            BinOp::Mul => left.checked_mul(right)
+                .map(Value::Int)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in multiplication")),
+            BinOp::Div => {
+                if right == 0 {
                     bail!("Division by zero");
                 }
-                Ok(Value::I32(l / r))
+                left.checked_div(right)
+                    .map(Value::Int)
+                    .ok_or_else(|| anyhow::anyhow!("Integer overflow in division"))
             }
-            (BinOp::Eq, Value::I32(l), Value::I32(r)) => Ok(Value::Bool(l == r)),
-            (BinOp::Lt, Value::I32(l), Value::I32(r)) => Ok(Value::Bool(l < r)),
-            (BinOp::Le, Value::I32(l), Value::I32(r)) => Ok(Value::Bool(l <= r)),
-            (BinOp::Ne, Value::I32(l), Value::I32(r)) => Ok(Value::Bool(l != r)),
-            (BinOp::Ge, Value::I32(l), Value::I32(r)) => Ok(Value::Bool(l >= r)),
-            (BinOp::Gt, Value::I32(l), Value::I32(r)) => Ok(Value::Bool(l > r)),
-            _ => {
-                bail!("Unsupported binary operation: {:?} on {:?} and {:?}", op, left, right);
+            BinOp::AddUnchecked => Ok(Value::Int(left.wrapping_add(right))),
+            BinOp::Eq => Ok(Value::Bool(left == right)),
+            BinOp::Lt => Ok(Value::Bool(left < right)),
+            BinOp::Le => Ok(Value::Bool(left <= right)),
+            BinOp::Ne => Ok(Value::Bool(left != right)),
+            BinOp::Ge => Ok(Value::Bool(left >= right)),
+            BinOp::Gt => Ok(Value::Bool(left > right)),
+            _ => bail!("Unsupported integer operation: {:?}", op),
+        }
+    }
+
+    fn eval_uint_binop(&self, op: BinOp, left: u128, right: u128) -> Result<Value> {
+        match op {
+            BinOp::Add => left.checked_add(right)
+                .map(Value::Uint)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in addition")),
+            BinOp::Sub => left.checked_sub(right)
+                .map(Value::Uint)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in subtraction")),
+            BinOp::Mul => left.checked_mul(right)
+                .map(Value::Uint)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in multiplication")),
+            BinOp::Div => {
+                if right == 0 {
+                    bail!("Division by zero");
+                }
+                Ok(Value::Uint(left / right))
             }
+            BinOp::AddUnchecked => Ok(Value::Uint(left.wrapping_add(right))),
+            BinOp::Eq => Ok(Value::Bool(left == right)),
+            BinOp::Lt => Ok(Value::Bool(left < right)),
+            BinOp::Le => Ok(Value::Bool(left <= right)),
+            BinOp::Ne => Ok(Value::Bool(left != right)),
+            BinOp::Ge => Ok(Value::Bool(left >= right)),
+            BinOp::Gt => Ok(Value::Bool(left > right)),
+            _ => bail!("Unsupported unsigned integer operation: {:?}", op),
+        }
+    }
+
+    fn eval_bool_binop(&self, op: BinOp, left: bool, right: bool) -> Result<Value> {
+        match op {
+            BinOp::BitAnd => Ok(Value::Bool(left & right)),
+            BinOp::BitOr => Ok(Value::Bool(left | right)),
+            BinOp::BitXor => Ok(Value::Bool(left ^ right)),
+            BinOp::Eq => Ok(Value::Bool(left == right)),
+            BinOp::Ne => Ok(Value::Bool(left != right)),
+            _ => bail!("Unsupported boolean operation: {:?}", op),
+        }
+    }
+
+    fn evaluate_unary_op(&self, op: UnOp, operand: Value) -> Result<Value> {
+        match operand {
+            Value::Int(val) => self.eval_int_unop(op, val),
+            Value::Uint(val) => self.eval_uint_unop(op, val),
+            Value::Bool(val) => self.eval_bool_unop(op, val),
+            _ => bail!("Unsupported unary operation: {:?} on {:?}", op, operand),
+        }
+    }
+
+    fn eval_int_unop(&self, op: UnOp, val: i128) -> Result<Value> {
+        match op {
+            UnOp::Neg => val.checked_neg()
+                .map(Value::Int)
+                .ok_or_else(|| anyhow::anyhow!("Integer overflow in negation")),
+            UnOp::Not => Ok(Value::Int(!val)),
+            _ => bail!("Unsupported integer unary operation: {:?}", op),
+        }
+    }
+
+    fn eval_uint_unop(&self, op: UnOp, val: u128) -> Result<Value> {
+        match op {
+            UnOp::Not => Ok(Value::Uint(!val)),
+            UnOp::Neg => bail!("Cannot negate unsigned integer"),
+            _ => bail!("Unsupported unsigned integer unary operation: {:?}", op),
+        }
+    }
+
+    fn eval_bool_unop(&self, op: UnOp, val: bool) -> Result<Value> {
+        match op {
+            UnOp::Not => Ok(Value::Bool(!val)),
+            _ => bail!("Unsupported boolean unary operation: {:?}", op),
         }
     }
 
     fn evaluate_constant(&self, const_: &MirConst) -> Result<Value> {
         match const_.kind() {
             rustc_public::ty::ConstantKind::Allocated(alloc) => {
-                // Try to interpret as integer
-                if let Ok(bytes) = alloc.raw_bytes() {
-                    if bytes.len() == 4 {
-                        let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                        return Ok(Value::I32(value));
-                    } else if bytes.len() == 1 {
-                        return Ok(Value::Bool(bytes[0] != 0));
+                let bytes = alloc.raw_bytes()?;
+                // Use the MIR type info to determine signed vs unsigned
+                match const_.ty().kind() {
+                    rustc_public::ty::TyKind::RigidTy(rustc_public::ty::RigidTy::Int(_)) => {
+                        let val = match bytes.len() {
+                            1 => i8::from_le_bytes([bytes[0]]) as i128,
+                            2 => i16::from_le_bytes([bytes[0], bytes[1]]) as i128,
+                            4 => i32::from_le_bytes(bytes.try_into().unwrap()) as i128,
+                            8 => i64::from_le_bytes(bytes.try_into().unwrap()) as i128,
+                            16 => i128::from_le_bytes(bytes.try_into().unwrap()),
+                            _ => bail!("Unsupported int size: {}", bytes.len()),
+                        };
+                        Ok(Value::Int(val))
                     }
+                    rustc_public::ty::TyKind::RigidTy(rustc_public::ty::RigidTy::Uint(_)) => {
+                        let val = match bytes.len() {
+                            1 => bytes[0] as u128,
+                            2 => u16::from_le_bytes([bytes[0], bytes[1]]) as u128,
+                            4 => u32::from_le_bytes(bytes.try_into().unwrap()) as u128,
+                            8 => u64::from_le_bytes(bytes.try_into().unwrap()) as u128,
+                            16 => u128::from_le_bytes(bytes.try_into().unwrap()),
+                            _ => bail!("Unsupported uint size: {}", bytes.len()),
+                        };
+                        Ok(Value::Uint(val))
+                    }
+                    rustc_public::ty::TyKind::RigidTy(rustc_public::ty::RigidTy::Bool) => {
+                        Ok(Value::Bool(bytes[0] != 0))
+                    }
+                    _ => bail!("Unsupported constant type: {:?}", const_.ty()),
                 }
-                bail!("Unsupported constant allocation: {:?}", alloc);
             }
             rustc_public::ty::ConstantKind::ZeroSized => {
                 Ok(Value::Unit)
