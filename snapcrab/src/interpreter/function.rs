@@ -296,5 +296,4 @@ pub enum ControlFlow {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 }
