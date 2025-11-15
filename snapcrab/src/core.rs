@@ -12,9 +12,9 @@ pub mod stack {
 }
 
 pub mod heap {
+    use crate::core::stack::Value;
     use std::alloc::Layout;
     use std::collections::HashMap;
-    use crate::core::stack::Value;
 
     #[derive(Debug)]
     pub struct Heap {
@@ -64,7 +64,7 @@ mod tests {
     fn test_heap_operations() {
         let mut heap = heap::Heap::new();
         let layout = std::alloc::Layout::new::<i32>();
-        
+
         let id = heap.allocate(stack::Value::Int(42), layout);
         assert_eq!(heap.get(id), Some(&stack::Value::Int(42)));
         assert_eq!(heap.get(999), None);

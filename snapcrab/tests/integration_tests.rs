@@ -12,7 +12,7 @@ check_interpreter!(
 );
 
 check_interpreter!(
-    test_arithmetic_error, 
+    test_arithmetic_error,
     input = "arithmetic.rs",
     result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CheckedBinaryOp.*".to_string())
 );

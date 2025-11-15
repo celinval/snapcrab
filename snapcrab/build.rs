@@ -8,7 +8,11 @@ pub fn main() {
     let rustc_lib: PathBuf = [&rustup_home, "toolchains", &toolchain, "lib"]
         .iter()
         .collect();
-    
+
     let bin_name = env::var("CARGO_PKG_NAME").unwrap();
-    println!("cargo:rustc-link-arg-bin={}=-Wl,-rpath,{}", bin_name, rustc_lib.display());
+    println!(
+        "cargo:rustc-link-arg-bin={}=-Wl,-rpath,{}",
+        bin_name,
+        rustc_lib.display()
+    );
 }
