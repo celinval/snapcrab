@@ -11,11 +11,6 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-mod runner;
-mod interpreter;
-mod stack;
-mod heap;
-
 use rustc_public::{CompilerError, run};
 use std::ops::ControlFlow;
 use std::process::ExitCode;
@@ -42,7 +37,7 @@ fn start_interpreter() -> ControlFlow<()> {
     let crate_name = rustc_public::local_crate().name;
     info!("Interpreting crate: {}", crate_name);
 
-    match runner::run_main() {
+    match snapcrab::run_main() {
         Ok(exit_code) => {
             info!("Interpretation completed with exit code: {:?}", exit_code);
         }

@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 pub type Local = usize;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
     Int(i128),    // All signed integers
     Uint(u128),   // All unsigned integers

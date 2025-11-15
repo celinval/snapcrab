@@ -135,3 +135,48 @@ impl super::function::FnInterpreter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interpreter::function::FnInterpreter;
+    use rustc_public::mir::BinOp;
+
+    #[test]
+    fn test_int_addition() {
+        let interpreter = FnInterpreter::new();
+        let result = interpreter.eval_int_binop(BinOp::Add, 5, 3).unwrap();
+        assert_eq!(result, Value::Int(8));
+    }
+
+    #[test]
+    fn test_int_overflow() {
+        let interpreter = FnInterpreter::new();
+        let result = interpreter.eval_int_binop(BinOp::Add, i128::MAX, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_uint_operations() {
+        let interpreter = FnInterpreter::new();
+        assert_eq!(interpreter.eval_uint_binop(BinOp::Add, 10, 5).unwrap(), Value::Uint(15));
+        assert_eq!(interpreter.eval_uint_binop(BinOp::Sub, 10, 5).unwrap(), Value::Uint(5));
+        assert_eq!(interpreter.eval_uint_binop(BinOp::Mul, 10, 5).unwrap(), Value::Uint(50));
+        assert_eq!(interpreter.eval_uint_binop(BinOp::Div, 10, 5).unwrap(), Value::Uint(2));
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        let interpreter = FnInterpreter::new();
+        assert!(interpreter.eval_int_binop(BinOp::Div, 10, 0).is_err());
+        assert!(interpreter.eval_uint_binop(BinOp::Div, 10, 0).is_err());
+    }
+
+    #[test]
+    fn test_bool_operations() {
+        let interpreter = FnInterpreter::new();
+        assert_eq!(interpreter.eval_bool_binop(BinOp::BitAnd, true, false).unwrap(), Value::Bool(false));
+        assert_eq!(interpreter.eval_bool_binop(BinOp::BitOr, true, false).unwrap(), Value::Bool(true));
+        assert_eq!(interpreter.eval_bool_binop(BinOp::Eq, true, true).unwrap(), Value::Bool(true));
+    }
+}

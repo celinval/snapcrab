@@ -1,3 +1,19 @@
+//! SnapCrab Interpreter Library
+//!
+//! A rustc wrapper that leverages `rustc_public` to interpret Rust code at the MIR level.
+
+#![feature(rustc_private)]
+
+extern crate rustc_driver;
+extern crate rustc_interface;
+extern crate rustc_middle;
+extern crate rustc_public;
+
+pub mod interpreter;
+pub mod stack;
+pub mod heap;
+pub mod core;
+
 use rustc_public::{entry_fn, CrateDef};
 use rustc_public::mir::mono::Instance;
 use std::process::ExitCode;

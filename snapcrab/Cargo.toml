@@ -3,6 +3,14 @@ name = "snapcrab"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "snapcrab"
+path = "src/main.rs"
+
+[lib]
+name = "snapcrab"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow = "1.0"
 tracing = "0.1"

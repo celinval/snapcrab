@@ -1,11 +1,12 @@
-use rustc_public::mir::{BasicBlockIdx, StatementKind, TerminatorKind, Operand, Place};
-use rustc_public::mir::mono::Instance;
-use rustc_public::ty::MirConst;
-use anyhow::{Result, bail};
-use tracing::{debug, info};
-use crate::stack::{StackFrame, Value};
 use crate::heap::Heap;
+use crate::stack::{StackFrame, Value};
+use anyhow::{Result, bail};
+use rustc_public::mir::mono::Instance;
+use rustc_public::mir::{BasicBlockIdx, Operand, Place, StatementKind, TerminatorKind};
+use rustc_public::ty::MirConst;
+use tracing::{debug, info};
 
+#[derive(Debug)]
 pub struct FnInterpreter {
     frame: StackFrame,
     current_block: BasicBlockIdx,
@@ -20,7 +21,9 @@ impl FnInterpreter {
     }
 
     pub fn run(&mut self, instance: Instance, _heap: &mut Heap) -> Result<Value> {
-        let body = instance.body().ok_or_else(|| anyhow::anyhow!("No body for instance"))?;
+        let body = instance
+            .body()
+            .ok_or_else(|| anyhow::anyhow!("No body for instance"))?;
         info!("Starting interpretation of {}", instance.name());
 
         // Initialize frame with space for all locals
@@ -51,7 +54,7 @@ impl FnInterpreter {
 
     fn execute_statement(&mut self, statement: &rustc_public::mir::Statement) -> Result<()> {
         debug!("Executing statement: {:?}", statement.kind);
-        
+
         match &statement.kind {
             StatementKind::Assign(place, rvalue) => {
                 let value = self.evaluate_rvalue(rvalue)?;
@@ -70,33 +73,41 @@ impl FnInterpreter {
         Ok(())
     }
 
-    fn execute_terminator(&mut self, terminator: &rustc_public::mir::Terminator) -> Result<ControlFlow> {
+    fn execute_terminator(
+        &mut self,
+        terminator: &rustc_public::mir::Terminator,
+    ) -> Result<ControlFlow> {
         debug!("Executing terminator: {:?}", terminator.kind);
-        
+
         match &terminator.kind {
             TerminatorKind::Return => {
                 // Return the value from local 0 (return value)
                 let return_value = self.read_from_place(&Place::from(0))?;
                 Ok(ControlFlow::Return(return_value))
             }
-            TerminatorKind::Goto { target } => {
-                Ok(ControlFlow::Continue(*target))
-            }
+            TerminatorKind::Goto { target } => Ok(ControlFlow::Continue(*target)),
             TerminatorKind::SwitchInt { discr, targets } => {
                 let discr_value = self.evaluate_operand(discr)?;
                 let discr_int = match discr_value {
                     Value::Int(i) => i as u128,
                     Value::Uint(u) => u,
-                    Value::Bool(b) => if b { 1 } else { 0 },
+                    Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
                     _ => bail!("Cannot switch on non-integer value: {:?}", discr_value),
                 };
-                
+
                 // Find the target for this value
-                let target = targets.branches()
+                let target = targets
+                    .branches()
                     .find(|(value, _)| *value == discr_int)
                     .map(|(_, target)| target)
                     .unwrap_or_else(|| targets.otherwise());
-                    
+
                 Ok(ControlFlow::Continue(target))
             }
             _ => {
@@ -107,12 +118,8 @@ impl FnInterpreter {
 
     pub(super) fn evaluate_operand(&self, operand: &Operand) -> Result<Value> {
         match operand {
-            Operand::Copy(place) | Operand::Move(place) => {
-                self.read_from_place(place)
-            }
-            Operand::Constant(const_op) => {
-                self.evaluate_constant(&const_op.const_)
-            }
+            Operand::Copy(place) | Operand::Move(place) => self.read_from_place(place),
+            Operand::Constant(const_op) => self.evaluate_constant(&const_op.const_),
         }
     }
 
@@ -150,9 +157,7 @@ impl FnInterpreter {
                     _ => bail!("Unsupported constant type: {:?}", const_.ty()),
                 }
             }
-            rustc_public::ty::ConstantKind::ZeroSized => {
-                Ok(Value::Unit)
-            }
+            rustc_public::ty::ConstantKind::ZeroSized => Ok(Value::Unit),
             rustc_public::ty::ConstantKind::Ty(ty_const) => {
                 bail!("Unsupported type constant: {:?}", ty_const);
             }
@@ -169,13 +174,13 @@ impl FnInterpreter {
         if !place.projection.is_empty() {
             bail!("Place projections not yet supported");
         }
-        
+
         debug!("Assigning {:?} to local {}", value, place.local);
-        
+
         if place.local >= self.frame.len() {
             bail!("Local index {} out of bounds", place.local);
         }
-        
+
         self.frame[place.local] = Some(value);
         Ok(())
     }
@@ -184,11 +189,11 @@ impl FnInterpreter {
         if !place.projection.is_empty() {
             bail!("Place projections not yet supported");
         }
-        
+
         if place.local >= self.frame.len() {
             bail!("Local index {} out of bounds", place.local);
         }
-        
+
         self.frame[place.local]
             .ok_or_else(|| anyhow::anyhow!("Uninitialized local: {}", place.local))
     }
@@ -198,4 +203,56 @@ impl FnInterpreter {
 pub enum ControlFlow {
     Continue(BasicBlockIdx),
     Return(Value),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustc_public::mir::Place;
+
+    #[test]
+    fn test_new_interpreter() {
+        let interpreter = FnInterpreter::new();
+        assert_eq!(interpreter.current_block, 0);
+        assert!(interpreter.frame.is_empty());
+    }
+
+    #[test]
+    fn test_assign_and_read_place() {
+        let mut interpreter = FnInterpreter::new();
+        interpreter.frame = vec![None; 3];
+
+        let place = Place::from(1);
+        let value = Value::Int(42);
+
+        interpreter.assign_to_place(&place, value).unwrap();
+        let read_value = interpreter.read_from_place(&place).unwrap();
+
+        assert_eq!(read_value, Value::Int(42));
+    }
+
+    #[test]
+    fn test_read_uninitialized_place() {
+        let frame = vec![None; 3];
+        let interpreter = FnInterpreter {
+            frame,
+            current_block: 0,
+        };
+
+        let place = Place::from(1);
+        let result = interpreter.read_from_place(&place);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_place_out_of_bounds() {
+        let mut interpreter = FnInterpreter::new();
+        interpreter.frame = vec![None; 2];
+
+        let place = Place::from(5);
+        let result = interpreter.assign_to_place(&place, Value::Int(42));
+
+        assert!(result.is_err());
+    }
 }
