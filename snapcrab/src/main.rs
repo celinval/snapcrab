@@ -12,6 +12,9 @@ extern crate rustc_middle;
 extern crate rustc_public;
 
 mod runner;
+mod interpreter;
+mod stack;
+mod heap;
 
 use rustc_public::{CompilerError, run};
 use std::ops::ControlFlow;
