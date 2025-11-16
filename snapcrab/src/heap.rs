@@ -66,10 +66,10 @@ impl Heap {
     /// * `Some(Value)` - The value at the address if it exists
     /// * `None` - If the address is invalid or deallocated
     #[allow(dead_code)]
-    pub fn read(&self, address: Address) -> Option<Value> {
+    pub fn read(&self, address: Address) -> Option<&Value> {
         self.memory
             .get(address)
-            .and_then(|entry| entry.as_ref().map(|e| e.value))
+            .and_then(|entry| entry.as_ref().map(|e| &e.value))
     }
 
     #[allow(dead_code)]

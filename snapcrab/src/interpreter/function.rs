@@ -81,6 +81,11 @@ impl FnInterpreter {
         }
     }
 
+    /// Get the local declarations for type checking
+    pub(super) fn locals(&self) -> &[rustc_public::mir::LocalDecl] {
+        &self.body.locals()
+    }
+
     /// Executes a single statement within a basic block.
     ///
     /// # Arguments
@@ -128,17 +133,17 @@ impl FnInterpreter {
         match &terminator.kind {
             TerminatorKind::Return => {
                 // Return the value from local 0 (return value)
-                let return_value = self.read_from_place(&Place::from(0))?;
+                let return_value = self.read_from_place(&Place::from(0))?.clone();
                 Ok(ControlFlow::Return(return_value))
             }
             TerminatorKind::Goto { target } => Ok(ControlFlow::Continue(*target)),
             TerminatorKind::SwitchInt { discr, targets } => {
                 let discr_value = self.evaluate_operand(discr)?;
                 let discr_int = match discr_value {
-                    Value::Int(i) => i as u128,
-                    Value::Uint(u) => u,
-                    Value::Bool(b) => {
-                        if b {
+                    val if val.as_i128().is_some() => val.as_i128().unwrap() as u128,
+                    val if val.as_u128().is_some() => val.as_u128().unwrap(),
+                    val if val.as_bool().is_some() => {
+                        if val.as_bool().unwrap() {
                             1
                         } else {
                             0
@@ -172,7 +177,7 @@ impl FnInterpreter {
     /// * `Err(anyhow::Error)` - If evaluation fails
     pub(super) fn evaluate_operand(&self, operand: &Operand) -> Result<Value> {
         match operand {
-            Operand::Copy(place) | Operand::Move(place) => self.read_from_place(place),
+            Operand::Copy(place) | Operand::Move(place) => Ok(self.read_from_place(place)?.clone()),
             Operand::Constant(const_op) => self.evaluate_constant(&const_op.const_),
         }
     }
@@ -200,7 +205,7 @@ impl FnInterpreter {
                             16 => i128::from_le_bytes(bytes.try_into().unwrap()),
                             _ => bail!("Unsupported int size: {}", bytes.len()),
                         };
-                        Ok(Value::Int(val))
+                        Ok(Value::from_i128(val))
                     }
                     TyKind::RigidTy(RigidTy::Uint(_)) => {
                         let val = match bytes.len() {
@@ -211,13 +216,13 @@ impl FnInterpreter {
                             16 => u128::from_le_bytes(bytes.try_into().unwrap()),
                             _ => bail!("Unsupported uint size: {}", bytes.len()),
                         };
-                        Ok(Value::Uint(val))
+                        Ok(Value::from_u128(val))
                     }
-                    TyKind::RigidTy(RigidTy::Bool) => Ok(Value::Bool(bytes[0] != 0)),
+                    TyKind::RigidTy(RigidTy::Bool) => Ok(Value::from_bool(bytes[0] != 0)),
                     _ => bail!("Unsupported constant type: {:?}", const_.ty()),
                 }
             }
-            ConstantKind::ZeroSized => Ok(Value::Unit),
+            ConstantKind::ZeroSized => Ok(Value::unit().clone()),
             ConstantKind::Ty(ty_const) => {
                 bail!("Unsupported type constant: {:?}", ty_const);
             }
@@ -225,7 +230,7 @@ impl FnInterpreter {
                 bail!("Parameter constants not supported");
             }
             ConstantKind::Unevaluated(_) => {
-                bail!("Unevaluated constants not supported");
+                bail!("Unexpected unevaluated constants on instance body");
             }
         }
     }
@@ -256,16 +261,16 @@ impl FnInterpreter {
 
     /// Reads a value from a place (local variable or memory location).
     ///
-    /// For zero-sized types (like unit type `()`), returns `Value::Unit` even if
+    /// For zero-sized types (like unit type `()`), returns `Value::unit()` even if
     /// the local is uninitialized, since zero-sized values don't need storage.
     ///
     /// # Arguments
     /// * `place` - The place to read from
     ///
     /// # Returns
-    /// * `Ok(Value)` - The value at the place
+    /// * `Ok(&Value)` - Reference to the value at the place
     /// * `Err(anyhow::Error)` - If place is uninitialized or out of bounds
-    fn read_from_place(&self, place: &Place) -> Result<Value> {
+    fn read_from_place(&self, place: &Place) -> Result<&Value> {
         if !place.projection.is_empty() {
             bail!("Place projections not yet supported");
         }
@@ -277,10 +282,12 @@ impl FnInterpreter {
         // Check if this is a zero-sized type
         let local_ty = self.body.locals()[place.local].ty;
         if matches!(local_ty.kind(), TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty()) {
-            return Ok(Value::Unit);
+            // For zero-sized types, return a reference to the unit value
+            return Ok(Value::unit());
         }
 
         self.frame[place.local]
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Uninitialized local: {}", place.local))
     }
 }
@@ -292,8 +299,4 @@ pub enum ControlFlow {
     Continue(BasicBlockIdx),
     /// Return from the function with the given value
     Return(Value),
-}
-
-#[cfg(test)]
-mod tests {
 }

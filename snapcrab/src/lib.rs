@@ -39,12 +39,7 @@ pub fn run(instance: Instance) -> Result<ExitCode> {
 
     // Convert the result value to an exit code
     match result {
-        crate::stack::Value::Int(0) => Ok(ExitCode::SUCCESS),
-        crate::stack::Value::Int(_) => Ok(ExitCode::FAILURE),
-        crate::stack::Value::Uint(0) => Ok(ExitCode::SUCCESS),
-        crate::stack::Value::Uint(_) => Ok(ExitCode::FAILURE),
-        crate::stack::Value::Bool(true) => Ok(ExitCode::SUCCESS),
-        crate::stack::Value::Bool(false) => Ok(ExitCode::FAILURE),
-        crate::stack::Value::Unit => Ok(ExitCode::SUCCESS),
+        val if val.as_u128() == Some(0) || val.is_unit() => Ok(ExitCode::SUCCESS),
+        _ => Ok(ExitCode::FAILURE),
     }
 }
