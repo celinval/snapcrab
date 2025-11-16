@@ -35,7 +35,7 @@ pub fn run_main() -> Result<ExitCode> {
 pub fn run(instance: Instance) -> Result<ExitCode> {
     let interpreter = FnInterpreter::new(instance)?;
     let mut heap = Heap::new();
-    let result = interpreter.run(&mut heap)?;
+    let result = interpreter.run(&mut heap, vec![])?;
 
     // Convert the result value to an exit code
     match result {

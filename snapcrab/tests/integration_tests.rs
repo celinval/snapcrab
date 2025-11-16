@@ -12,6 +12,12 @@ check_interpreter!(
 );
 
 check_interpreter!(
+    test_function_call,
+    input = "function_call.rs",
+    result = TestResult::Success
+);
+
+check_interpreter!(
     test_arithmetic_error,
     input = "arithmetic.rs",
     result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CheckedBinaryOp.*".to_string())

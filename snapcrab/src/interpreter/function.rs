@@ -55,8 +55,22 @@ impl FnInterpreter {
     /// # Returns
     /// * `Ok(Value)` - The return value of the function
     /// * `Err(anyhow::Error)` - If execution fails
-    pub fn run(mut self, _heap: &mut Heap) -> Result<Value> {
+    pub fn run(mut self, heap: &mut Heap, args: Vec<Value>) -> Result<Value> {
         info!("Starting interpretation of {}", self.instance.name());
+
+        // Ensure argument count matches expected
+        debug_assert_eq!(
+            args.len(),
+            self.body.arg_locals().len(),
+            "Argument count mismatch: expected {}, got {}",
+            self.body.arg_locals().len(),
+            args.len()
+        );
+
+        // Initialize arguments in locals (skip local 0 which is return value)
+        for (i, arg) in args.into_iter().enumerate() {
+            self.frame[i + 1] = Some(arg);
+        }
 
         loop {
             let current_block_idx = self.current_block;
@@ -69,7 +83,7 @@ impl FnInterpreter {
             }
 
             // Execute terminator
-            match self.execute_terminator(current_block_idx)? {
+            match self.execute_terminator(current_block_idx, heap)? {
                 ControlFlow::Continue(next_block) => {
                     self.current_block = next_block;
                 }
@@ -126,19 +140,23 @@ impl FnInterpreter {
     /// * `Ok(ControlFlow::Continue(target))` - Continue to target basic block
     /// * `Ok(ControlFlow::Return(value))` - Function returns with value
     /// * `Err(anyhow::Error)` - If terminator execution fails
-    fn execute_terminator(&self, bb_idx: BasicBlockIdx) -> Result<ControlFlow> {
+    fn execute_terminator(
+        &mut self,
+        bb_idx: BasicBlockIdx,
+        heap: &mut Heap,
+    ) -> Result<ControlFlow> {
         let terminator = &self.body.blocks[bb_idx].terminator;
         debug!("Executing terminator: {:?}", terminator.kind);
 
-        match &terminator.kind {
+        match terminator.kind.clone() {
             TerminatorKind::Return => {
                 // Return the value from local 0 (return value)
                 let return_value = self.read_from_place(&Place::from(0))?.clone();
                 Ok(ControlFlow::Return(return_value))
             }
-            TerminatorKind::Goto { target } => Ok(ControlFlow::Continue(*target)),
+            TerminatorKind::Goto { target } => Ok(ControlFlow::Continue(target)),
             TerminatorKind::SwitchInt { discr, targets } => {
-                let discr_value = self.evaluate_operand(discr)?;
+                let discr_value = self.evaluate_operand(&discr)?;
                 let discr_int = match discr_value {
                     val if val.as_i128().is_some() => val.as_i128().unwrap() as u128,
                     val if val.as_u128().is_some() => val.as_u128().unwrap(),
@@ -161,10 +179,62 @@ impl FnInterpreter {
 
                 Ok(ControlFlow::Continue(target))
             }
+            TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                target,
+                ..
+            } => {
+                self.execute_call(&func, &args, &destination, heap)?;
+
+                match target {
+                    Some(target_bb) => Ok(ControlFlow::Continue(target_bb)),
+                    None => bail!("Diverging calls not yet supported"),
+                }
+            }
             _ => {
                 bail!("Unsupported terminator: {:?}", terminator.kind);
             }
         }
+    }
+
+    /// Execute a function call
+    fn execute_call(
+        &mut self,
+        func: &Operand,
+        args: &[Operand],
+        destination: &Place,
+        heap: &mut Heap,
+    ) -> Result<()> {
+        // Evaluate arguments
+        let arg_values: Result<Vec<Value>> =
+            args.iter().map(|arg| self.evaluate_operand(arg)).collect();
+        let arg_values = arg_values?;
+
+        // Resolve function instance
+        let func_instance = match func {
+            Operand::Constant(const_op) => {
+                // Extract instance from constant type
+                let func_ty = const_op.ty();
+                match func_ty.kind() {
+                    TyKind::RigidTy(RigidTy::FnDef(def_id, args)) => {
+                        Instance::resolve(def_id.clone(), &args)?
+                    }
+                    _ => bail!("Unsupported function type: {:?}", func_ty),
+                }
+            }
+            _ => bail!("Only constant function operands supported"),
+        };
+
+        // Create new interpreter and call function
+        let callee_interpreter = FnInterpreter::new(func_instance)?;
+        let result = callee_interpreter.run(heap, arg_values)?;
+
+        // Store result in destination
+        self.assign_to_place(destination, result)?;
+
+        Ok(())
     }
 
     /// Evaluates an operand to produce a value.
