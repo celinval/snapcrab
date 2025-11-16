@@ -9,7 +9,6 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-pub mod core;
 pub mod heap;
 pub mod interpreter;
 pub mod stack;

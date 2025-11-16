@@ -97,7 +97,7 @@ impl FnInterpreter {
 
     /// Get the local declarations for type checking
     pub(super) fn locals(&self) -> &[rustc_public::mir::LocalDecl] {
-        &self.body.locals()
+        self.body.locals()
     }
 
     /// Executes a single statement within a basic block.
@@ -219,7 +219,7 @@ impl FnInterpreter {
                 let func_ty = const_op.ty();
                 match func_ty.kind() {
                     TyKind::RigidTy(RigidTy::FnDef(def_id, args)) => {
-                        Instance::resolve(def_id.clone(), &args)?
+                        Instance::resolve(def_id, &args)?
                     }
                     _ => bail!("Unsupported function type: {:?}", func_ty),
                 }

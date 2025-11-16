@@ -18,7 +18,7 @@ struct HeapEntry {
 /// The heap provides a simple memory model for allocating and deallocating
 /// values during program execution. Currently unused but designed for future
 /// support of heap-allocated data structures.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Heap {
     /// Vector of heap entries, indexed by address
     memory: Vec<Option<HeapEntry>>,
