@@ -1,4 +1,4 @@
-use crate::stack::Value;
+use crate::value::Value;
 use std::alloc::Layout;
 
 /// Memory address type for heap-allocated values.

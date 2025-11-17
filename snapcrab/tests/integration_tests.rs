@@ -4,7 +4,7 @@
 mod common;
 
 use common::TestResult;
-use snapcrab::stack::Value;
+use snapcrab::value::Value;
 
 check_interpreter!(
     test_simple_success,
@@ -44,6 +44,13 @@ check_custom_start!(
     input = "generic_function.rs",
     start_fn = "generic_function", 
     result = TestResult::ErrorRegex(r".*Failed to create instance.*".to_string())
+);
+
+check_custom_start!(
+    test_bool_return,
+    input = "bool_function.rs",
+    start_fn = "returns_true",
+    result = TestResult::SuccessWithValue(Value::from_bool(true))
 );
 
 check_custom_start!(

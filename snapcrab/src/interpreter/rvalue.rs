@@ -1,4 +1,4 @@
-use crate::stack::{Value, ValueType};
+use crate::value::{Value, ValueType};
 use anyhow::{Result, bail};
 use rustc_public::mir::{BinOp, Rvalue, UnOp};
 use rustc_public::ty::{RigidTy, Ty, TyKind};

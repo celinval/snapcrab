@@ -12,10 +12,11 @@ extern crate rustc_public;
 pub mod heap;
 pub mod interpreter;
 pub mod stack;
+pub mod value;
 
 use crate::heap::Heap;
 use crate::interpreter::FnInterpreter;
-use crate::stack::Value;
+use crate::value::{Value, ValueTyped};
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::{CrateDef, CrateItem, entry_fn, local_crate};
@@ -66,12 +67,21 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
     }
     
     // Execute function
-    let interpreter = FnInterpreter::new(instance)?;
+    let interpreter = FnInterpreter::new(instance.clone())?;
     let mut heap = Heap::new();
     let result = interpreter.run(&mut heap, vec![])?;
     
-    // Print the result
-    println!("Function '{}' returned: {:?}", fn_name, result);
+    // Get return type from instance
+    let body = instance.body().ok_or_else(|| anyhow::anyhow!("No body for function"))?;
+    let return_ty = body.ret_local().ty;
+    
+    // Create typed value and print
+    let typed_result = ValueTyped {
+        ty: return_ty,
+        value: result.clone(),
+    };
+    
+    println!("Function '{}' returned: {}", fn_name, typed_result.to_string());
     
     Ok(result)
 }

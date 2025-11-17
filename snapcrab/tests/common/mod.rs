@@ -5,7 +5,7 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-use snapcrab::stack::Value;
+use snapcrab::value::Value;
 use std::path::Path;
 use std::process::ExitCode;
 

@@ -1,5 +1,6 @@
 use crate::heap::Heap;
-use crate::stack::{StackFrame, Value};
+use crate::stack::StackFrame;
+use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
