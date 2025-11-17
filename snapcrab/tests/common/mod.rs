@@ -5,13 +5,14 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
+use snapcrab::stack::Value;
 use std::path::Path;
 use std::process::ExitCode;
 
 #[derive(Debug)]
 pub enum TestResult {
     Success,
-    Failure,
+    SuccessWithValue(Value),
     Error(String),
     ErrorRegex(String),
 }
@@ -20,7 +21,7 @@ impl PartialEq for TestResult {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (TestResult::Success, TestResult::Success) => true,
-            (TestResult::Failure, TestResult::Failure) => true,
+            (TestResult::SuccessWithValue(a), TestResult::SuccessWithValue(b)) => a == b,
             (TestResult::Error(a), TestResult::Error(b)) => a == b,
             (TestResult::ErrorRegex(pattern), TestResult::Error(msg)) => {
                 regex::Regex::new(pattern).unwrap().is_match(msg)
@@ -33,7 +34,7 @@ impl PartialEq for TestResult {
     }
 }
 
-pub fn run_interpreter_test(input_file: &Path, _flags: &[&str]) -> TestResult {
+pub fn run_interpreter_test(input_file: &Path) -> TestResult {
     // Set up rustc environment to compile the input file
     let rustc_args = vec![
         "snapcrab".to_string(),
@@ -60,6 +61,28 @@ pub fn run_interpreter_test(input_file: &Path, _flags: &[&str]) -> TestResult {
     }
 }
 
+pub fn run_custom_start_test(input_file: &Path, start_fn: &str) -> TestResult {
+    // Set up rustc environment to compile the input file
+    let rustc_args = vec![
+        "snapcrab".to_string(),
+        input_file.to_string_lossy().to_string(),
+    ];
+
+    // Use rustc_public to run the interpreter
+    let result: Result<(), rustc_public::CompilerError<TestResult>> = rustc_public::run!(&rustc_args, || {
+        match snapcrab::run_function(start_fn) {
+            Ok(value) => std::ops::ControlFlow::Break(TestResult::SuccessWithValue(value)),
+            Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
+        }
+    });
+
+    match result {
+        Ok(_) => TestResult::Success, // This shouldn't happen with our new logic
+        Err(rustc_public::CompilerError::Interrupted(test_result)) => test_result,
+        Err(e) => TestResult::Error(format!("Compilation failed: {:?}", e)),
+    }
+}
+
 #[macro_export]
 macro_rules! check_interpreter {
     ($test_name:ident, input=$input_file:expr, result=$expected:expr) => {
@@ -70,12 +93,15 @@ macro_rules! check_interpreter {
                 .join("inputs")
                 .join($input_file);
 
-            let result = crate::common::run_interpreter_test(&input_path, &[]);
+            let result = crate::common::run_interpreter_test(&input_path);
             assert_eq!(result, $expected);
         }
     };
+}
 
-    ($test_name:ident, input=$input_file:expr, flags=$flags:expr, result=$expected:expr) => {
+#[macro_export]
+macro_rules! check_custom_start {
+    ($test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr, result=$expected:expr) => {
         #[test]
         fn $test_name() {
             let input_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -83,7 +109,7 @@ macro_rules! check_interpreter {
                 .join("inputs")
                 .join($input_file);
 
-            let result = crate::common::run_interpreter_test(&input_path, $flags);
+            let result = crate::common::run_custom_start_test(&input_path, $start_fn);
             assert_eq!(result, $expected);
         }
     };
