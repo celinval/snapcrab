@@ -267,27 +267,25 @@ impl FnInterpreter {
                 let bytes = alloc.raw_bytes()?;
                 // Use the MIR type info to determine signed vs unsigned
                 match const_.ty().kind() {
-                    TyKind::RigidTy(RigidTy::Int(_)) => {
-                        let val = match bytes.len() {
-                            1 => i8::from_le_bytes([bytes[0]]) as i128,
-                            2 => i16::from_le_bytes([bytes[0], bytes[1]]) as i128,
-                            4 => i32::from_le_bytes(bytes.try_into().unwrap()) as i128,
-                            8 => i64::from_le_bytes(bytes.try_into().unwrap()) as i128,
-                            16 => i128::from_le_bytes(bytes.try_into().unwrap()),
-                            _ => bail!("Unsupported int size: {}", bytes.len()),
-                        };
-                        Ok(Value::from_i128(val))
+                    TyKind::RigidTy(RigidTy::Int(int_ty)) => {
+                        use rustc_public::ty::IntTy;
+                        match int_ty {
+                            IntTy::I8 => Ok(Value::from_i8(i8::from_le_bytes([bytes[0]]))),
+                            IntTy::I16 => Ok(Value::from_i16(i16::from_le_bytes([bytes[0], bytes[1]]))),
+                            IntTy::I32 => Ok(Value::from_i32(i32::from_le_bytes(bytes.try_into().unwrap()))),
+                            IntTy::I64 | IntTy::Isize => Ok(Value::from_i64(i64::from_le_bytes(bytes.try_into().unwrap()))),
+                            IntTy::I128 => Ok(Value::from_i128(i128::from_le_bytes(bytes.try_into().unwrap()))),
+                        }
                     }
-                    TyKind::RigidTy(RigidTy::Uint(_)) => {
-                        let val = match bytes.len() {
-                            1 => bytes[0] as u128,
-                            2 => u16::from_le_bytes([bytes[0], bytes[1]]) as u128,
-                            4 => u32::from_le_bytes(bytes.try_into().unwrap()) as u128,
-                            8 => u64::from_le_bytes(bytes.try_into().unwrap()) as u128,
-                            16 => u128::from_le_bytes(bytes.try_into().unwrap()),
-                            _ => bail!("Unsupported uint size: {}", bytes.len()),
-                        };
-                        Ok(Value::from_u128(val))
+                    TyKind::RigidTy(RigidTy::Uint(uint_ty)) => {
+                        use rustc_public::ty::UintTy;
+                        match uint_ty {
+                            UintTy::U8 => Ok(Value::from_u8(bytes[0])),
+                            UintTy::U16 => Ok(Value::from_u16(u16::from_le_bytes([bytes[0], bytes[1]]))),
+                            UintTy::U32 => Ok(Value::from_u32(u32::from_le_bytes(bytes.try_into().unwrap()))),
+                            UintTy::U64 | UintTy::Usize => Ok(Value::from_u64(u64::from_le_bytes(bytes.try_into().unwrap()))),
+                            UintTy::U128 => Ok(Value::from_u128(u128::from_le_bytes(bytes.try_into().unwrap()))),
+                        }
                     }
                     TyKind::RigidTy(RigidTy::Bool) => Ok(Value::from_bool(bytes[0] != 0)),
                     _ => bail!("Unsupported constant type: {:?}", const_.ty()),

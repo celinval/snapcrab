@@ -206,6 +206,20 @@ impl super::function::FnInterpreter {
                 op.eval(val, result_type)
             }
             Rvalue::Use(operand) => self.evaluate_operand(operand),
+            Rvalue::Aggregate(kind, operands) => {
+                match kind {
+                    rustc_public::mir::AggregateKind::Tuple => {
+                        let mut values = Vec::new();
+                        for operand in operands {
+                            values.push(self.evaluate_operand(operand)?);
+                        }
+                        let ty = rvalue.ty(self.locals())?;
+                        Value::from_tuple_with_layout(&values, ty)
+                            .map_err(|e| anyhow::anyhow!("Failed to create tuple: {}", e))
+                    }
+                    _ => bail!("Unsupported aggregate kind: {:?}", kind),
+                }
+            }
             _ => {
                 bail!("Unsupported rvalue: {:?}", rvalue);
             }

@@ -29,7 +29,7 @@ check_custom_start!(
     test_valid_custom_start,
     input = "valid_custom_start.rs",
     start_fn = "my_custom_start",
-    result = TestResult::SuccessWithValue(Value::from_i128(123))
+    result = TestResult::SuccessWithValue(Value::from_i32(123))
 );
 
 check_custom_start!(
@@ -44,6 +44,13 @@ check_custom_start!(
     input = "generic_function.rs",
     start_fn = "generic_function", 
     result = TestResult::ErrorRegex(r".*Failed to create instance.*".to_string())
+);
+
+check_custom_start!(
+    test_tuple_creation,
+    input = "tuple_function.rs",
+    start_fn = "simple_tuple",
+    result = TestResult::SuccessWithValue(Value::from_bytes(&[1, 42, 0, 0, 232, 3, 0, 0]))
 );
 
 check_custom_start!(

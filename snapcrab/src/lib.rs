@@ -12,11 +12,12 @@ extern crate rustc_public;
 pub mod heap;
 pub mod interpreter;
 pub mod stack;
+pub mod ty;
 pub mod value;
 
 use crate::heap::Heap;
 use crate::interpreter::FnInterpreter;
-use crate::value::{Value, ValueTyped};
+use crate::value::{TypedValue, Value};
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::{CrateDef, CrateItem, entry_fn, local_crate};
@@ -44,45 +45,58 @@ use tracing::info;
 pub fn run_function(fn_name: &str) -> Result<Value> {
     // Find function definition by name
     let crate_def = local_crate();
-    let fn_def = crate_def.fn_defs()
+    let fn_def = crate_def
+        .fn_defs()
         .into_iter()
         .find(|def| def.name() == fn_name)
         .ok_or_else(|| anyhow::anyhow!("Function '{}' not found", fn_name))?;
-    
+
     info!("Found function: {}", fn_def.name());
-    
+
     // Convert FnDef to CrateItem using DefId
     let crate_item = CrateItem(fn_def.def_id());
-    
+
     // Try to convert to instance
     let instance = Instance::try_from(crate_item)
         .map_err(|e| anyhow::anyhow!("Failed to create instance from function: {}", e))?;
-    
+
     // Check if function takes no arguments
-    let body = instance.body().ok_or_else(|| anyhow::anyhow!("No body for function"))?;
+    let body = instance
+        .body()
+        .ok_or_else(|| anyhow::anyhow!("No body for function"))?;
     let arg_count = body.arg_locals().len();
-    
+
     if arg_count > 0 {
-        bail!("Function '{}' takes {} arguments, only zero-argument functions are supported", fn_name, arg_count);
+        bail!(
+            "Function '{}' takes {} arguments, only zero-argument functions are supported",
+            fn_name,
+            arg_count
+        );
     }
-    
+
     // Execute function
     let interpreter = FnInterpreter::new(instance.clone())?;
     let mut heap = Heap::new();
     let result = interpreter.run(&mut heap, vec![])?;
-    
+
     // Get return type from instance
-    let body = instance.body().ok_or_else(|| anyhow::anyhow!("No body for function"))?;
+    let body = instance
+        .body()
+        .ok_or_else(|| anyhow::anyhow!("No body for function"))?;
     let return_ty = body.ret_local().ty;
-    
+
     // Create typed value and print
-    let typed_result = ValueTyped {
+    let typed_result = TypedValue {
         ty: return_ty,
-        value: result.clone(),
+        value: result.as_bytes(),
     };
-    
-    println!("Function '{}' returned: {}", fn_name, typed_result.to_string());
-    
+
+    println!(
+        "Function '{}' returned: {}",
+        fn_name,
+        typed_result.to_string()
+    );
+
     Ok(result)
 }
 
