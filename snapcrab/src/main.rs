@@ -20,12 +20,17 @@ use tracing::{error, info};
 #[derive(Parser)]
 #[command(name = "snapcrab")]
 #[command(about = "A Rust interpreter that executes code at the MIR level")]
-#[command(long_about = "SnapCrab is an experimental Rust interpreter that executes code directly from MIR (Mid-level Intermediate Representation) without compilation overhead, enabling rapid development iteration.")]
+#[command(
+    long_about = "SnapCrab is an experimental Rust interpreter that executes code directly from MIR (Mid-level Intermediate Representation) without compilation overhead, enabling rapid development iteration."
+)]
 struct Args {
     /// Alternative start function (default: main)
-    #[arg(long, help = "Specify a custom function to execute instead of main (requires fully qualified name)")]
+    #[arg(
+        long,
+        help = "Specify a custom function to execute instead of main (requires fully qualified name)"
+    )]
     start_fn: Option<String>,
-    
+
     /// Input Rust file to interpret
     #[arg(help = "Path to the Rust source file to interpret")]
     input: String,
@@ -33,7 +38,7 @@ struct Args {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    
+
     let log_level = std::env::var("SNAPCRAB_LOG").unwrap_or_else(|_| "info".to_string());
     tracing_subscriber::fmt().with_env_filter(log_level).init();
 
@@ -41,11 +46,8 @@ fn main() -> ExitCode {
     println!("Experimental Rust interpreter for fast development iteration");
 
     // Build rustc args from input file
-    let rustc_args = vec![
-        "snapcrab".to_string(),
-        args.input,
-    ];
-    
+    let rustc_args = vec!["snapcrab".to_string(), args.input];
+
     let result = run!(&rustc_args, || start_interpreter(args.start_fn));
 
     match result {
@@ -68,7 +70,7 @@ fn main() -> ExitCode {
 fn start_interpreter(start_fn: Option<String>) -> ControlFlow<()> {
     let crate_name = rustc_public::local_crate().name;
     info!("Interpreting crate: {}", crate_name);
-    
+
     let result = if let Some(fn_name) = start_fn {
         info!("Using custom start function: {}", fn_name);
         snapcrab::run_function(&fn_name).map(|_| ExitCode::SUCCESS)

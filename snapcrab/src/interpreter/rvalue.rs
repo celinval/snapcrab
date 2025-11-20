@@ -37,19 +37,19 @@ impl BinaryEval for BinOp {
         match result_type {
             ValueType::Int => {
                 let l = left
-                    .as_i128()
+                    .as_type::<i128>()
                     .ok_or_else(|| anyhow::anyhow!("Expected i128 for left operand"))?;
                 let r = right
-                    .as_i128()
+                    .as_type::<i128>()
                     .ok_or_else(|| anyhow::anyhow!("Expected i128 for right operand"))?;
                 eval_int_binop(*self, l, r)
             }
             ValueType::Uint => {
                 let l = left
-                    .as_u128()
+                    .as_type::<u128>()
                     .ok_or_else(|| anyhow::anyhow!("Expected u128 for left operand"))?;
                 let r = right
-                    .as_u128()
+                    .as_type::<u128>()
                     .ok_or_else(|| anyhow::anyhow!("Expected u128 for right operand"))?;
                 eval_uint_binop(*self, l, r)
             }
@@ -72,7 +72,7 @@ impl UnaryEval for UnOp {
         match result_type {
             ValueType::Int => {
                 let val = operand
-                    .as_i128()
+                    .as_type::<i128>()
                     .ok_or_else(|| anyhow::anyhow!("Expected i128 for operand"))?;
                 eval_int_unop(*self, val)
             }
@@ -93,22 +93,22 @@ fn eval_int_binop(op: BinOp, left: i128, right: i128) -> Result<Value> {
     match op {
         BinOp::Add => left
             .checked_add(right)
-            .map(Value::from_i128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in addition")),
         BinOp::Sub => left
             .checked_sub(right)
-            .map(Value::from_i128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in subtraction")),
         BinOp::Mul => left
             .checked_mul(right)
-            .map(Value::from_i128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in multiplication")),
         BinOp::Div => {
             if right == 0 {
                 bail!("Division by zero");
             }
             left.checked_div(right)
-                .map(Value::from_i128)
+                .map(Value::from_type)
                 .ok_or_else(|| anyhow::anyhow!("Integer overflow in division"))
         }
         _ => bail!("Unsupported integer binary operation: {:?}", op),
@@ -120,22 +120,22 @@ fn eval_uint_binop(op: BinOp, left: u128, right: u128) -> Result<Value> {
     match op {
         BinOp::Add => left
             .checked_add(right)
-            .map(Value::from_u128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in addition")),
         BinOp::Sub => left
             .checked_sub(right)
-            .map(Value::from_u128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in subtraction")),
         BinOp::Mul => left
             .checked_mul(right)
-            .map(Value::from_u128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in multiplication")),
         BinOp::Div => {
             if right == 0 {
                 bail!("Division by zero");
             }
             left.checked_div(right)
-                .map(Value::from_u128)
+                .map(Value::from_type)
                 .ok_or_else(|| anyhow::anyhow!("Integer overflow in division"))
         }
         _ => bail!("Unsupported unsigned integer binary operation: {:?}", op),
@@ -158,7 +158,7 @@ fn eval_int_unop(op: UnOp, val: i128) -> Result<Value> {
     match op {
         UnOp::Neg => val
             .checked_neg()
-            .map(Value::from_i128)
+            .map(Value::from_type)
             .ok_or_else(|| anyhow::anyhow!("Integer overflow in negation")),
         _ => bail!("Unsupported integer unary operation: {:?}", op),
     }
@@ -206,20 +206,18 @@ impl super::function::FnInterpreter {
                 op.eval(val, result_type)
             }
             Rvalue::Use(operand) => self.evaluate_operand(operand),
-            Rvalue::Aggregate(kind, operands) => {
-                match kind {
-                    rustc_public::mir::AggregateKind::Tuple => {
-                        let mut values = Vec::new();
-                        for operand in operands {
-                            values.push(self.evaluate_operand(operand)?);
-                        }
-                        let ty = rvalue.ty(self.locals())?;
-                        Value::from_tuple_with_layout(&values, ty)
-                            .map_err(|e| anyhow::anyhow!("Failed to create tuple: {}", e))
+            Rvalue::Aggregate(kind, operands) => match kind {
+                rustc_public::mir::AggregateKind::Tuple => {
+                    let mut values = Vec::new();
+                    for operand in operands {
+                        values.push(self.evaluate_operand(operand)?);
                     }
-                    _ => bail!("Unsupported aggregate kind: {:?}", kind),
+                    let ty = rvalue.ty(self.locals())?;
+                    Value::from_tuple_with_layout(&values, ty)
+                        .map_err(|e| anyhow::anyhow!("Failed to create tuple: {}", e))
                 }
-            }
+                _ => bail!("Unsupported aggregate kind: {:?}", kind),
+            },
             _ => {
                 bail!("Unsupported rvalue: {:?}", rvalue);
             }
@@ -234,16 +232,20 @@ mod tests {
     #[test]
     fn test_int_binary_operations() {
         let result = BinOp::Add
-            .eval(Value::from_i128(5), Value::from_i128(3), ValueType::Int)
+            .eval(
+                Value::from_type(5i128),
+                Value::from_type(3i128),
+                ValueType::Int,
+            )
             .unwrap();
-        assert_eq!(result, Value::from_i128(8));
+        assert_eq!(result, Value::from_type(8i128));
     }
 
     #[test]
     fn test_int_overflow() {
         let result = BinOp::Add.eval(
-            Value::from_i128(i128::MAX),
-            Value::from_i128(1),
+            Value::from_type(i128::MAX),
+            Value::from_type(1i128),
             ValueType::Int,
         );
         assert!(result.is_err());
@@ -253,27 +255,43 @@ mod tests {
     fn test_uint_binary_operations() {
         assert_eq!(
             BinOp::Add
-                .eval(Value::from_u128(10), Value::from_u128(5), ValueType::Uint)
+                .eval(
+                    Value::from_type(10u128),
+                    Value::from_type(5i128),
+                    ValueType::Uint
+                )
                 .unwrap(),
-            Value::from_u128(15)
+            Value::from_type(15u128)
         );
         assert_eq!(
             BinOp::Sub
-                .eval(Value::from_u128(10), Value::from_u128(5), ValueType::Uint)
+                .eval(
+                    Value::from_type(10u128),
+                    Value::from_type(5i128),
+                    ValueType::Uint
+                )
                 .unwrap(),
-            Value::from_u128(5)
+            Value::from_type(5i128)
         );
         assert_eq!(
             BinOp::Mul
-                .eval(Value::from_u128(10), Value::from_u128(5), ValueType::Uint)
+                .eval(
+                    Value::from_type(10u128),
+                    Value::from_type(5i128),
+                    ValueType::Uint
+                )
                 .unwrap(),
-            Value::from_u128(50)
+            Value::from_type(50u128)
         );
         assert_eq!(
             BinOp::Div
-                .eval(Value::from_u128(10), Value::from_u128(5), ValueType::Uint)
+                .eval(
+                    Value::from_type(10u128),
+                    Value::from_type(5i128),
+                    ValueType::Uint
+                )
                 .unwrap(),
-            Value::from_u128(2)
+            Value::from_type(2u128)
         );
     }
 
@@ -281,12 +299,20 @@ mod tests {
     fn test_division_by_zero() {
         assert!(
             BinOp::Div
-                .eval(Value::from_i128(10), Value::from_i128(0), ValueType::Int)
+                .eval(
+                    Value::from_type(10u128),
+                    Value::from_type(0i128),
+                    ValueType::Int
+                )
                 .is_err()
         );
         assert!(
             BinOp::Div
-                .eval(Value::from_u128(10), Value::from_u128(0), ValueType::Uint)
+                .eval(
+                    Value::from_type(10u128),
+                    Value::from_type(0i128),
+                    ValueType::Uint
+                )
                 .is_err()
         );
     }
@@ -328,8 +354,10 @@ mod tests {
     #[test]
     fn test_unary_operations() {
         assert_eq!(
-            UnOp::Neg.eval(Value::from_i128(5), ValueType::Int).unwrap(),
-            Value::from_i128(-5)
+            UnOp::Neg
+                .eval(Value::from_type(5i128), ValueType::Int)
+                .unwrap(),
+            Value::from_type(-5i128)
         );
         assert_eq!(
             UnOp::Not

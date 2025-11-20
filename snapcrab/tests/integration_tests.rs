@@ -29,12 +29,12 @@ check_custom_start!(
     test_valid_custom_start,
     input = "valid_custom_start.rs",
     start_fn = "my_custom_start",
-    result = TestResult::SuccessWithValue(Value::from_i32(123))
+    result = TestResult::SuccessWithValue(Value::from_type(123))
 );
 
 check_custom_start!(
     test_function_with_args_fails,
-    input = "function_with_args.rs", 
+    input = "function_with_args.rs",
     start_fn = "takes_argument",
     result = TestResult::ErrorRegex(r".*takes \d+ arguments.*".to_string())
 );
@@ -42,7 +42,7 @@ check_custom_start!(
 check_custom_start!(
     test_generic_function_fails,
     input = "generic_function.rs",
-    start_fn = "generic_function", 
+    start_fn = "generic_function",
     result = TestResult::ErrorRegex(r".*Failed to create instance.*".to_string())
 );
 
@@ -55,7 +55,7 @@ check_custom_start!(
 
 check_custom_start!(
     test_simple_tuple_ops,
-    input = "tuple_operations.rs", 
+    input = "tuple_operations.rs",
     start_fn = "simple_tuple",
     result = TestResult::SuccessWithValue(Value::from_bytes(&[1, 42, 0, 0, 232, 3, 0, 0]))
 );
@@ -69,9 +69,9 @@ check_custom_start!(
 
 check_custom_start!(
     test_single_element_tuple,
-    input = "tuple_operations.rs", 
+    input = "tuple_operations.rs",
     start_fn = "single_element_tuple",
-    result = TestResult::SuccessWithValue(Value::from_i32(42))
+    result = TestResult::SuccessWithValue(Value::from_type(42))
 );
 
 check_custom_start!(
@@ -83,7 +83,7 @@ check_custom_start!(
 
 check_custom_start!(
     test_another_order,
-    input = "tuple_operations.rs", 
+    input = "tuple_operations.rs",
     start_fn = "another_order",
     result = TestResult::SuccessWithValue(Value::from_bytes(&[232, 3, 0, 0, 1, 42, 0, 0]))
 );

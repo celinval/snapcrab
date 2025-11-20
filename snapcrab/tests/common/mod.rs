@@ -69,12 +69,13 @@ pub fn run_custom_start_test(input_file: &Path, start_fn: &str) -> TestResult {
     ];
 
     // Use rustc_public to run the interpreter
-    let result: Result<(), rustc_public::CompilerError<TestResult>> = rustc_public::run!(&rustc_args, || {
-        match snapcrab::run_function(start_fn) {
-            Ok(value) => std::ops::ControlFlow::Break(TestResult::SuccessWithValue(value)),
-            Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
-        }
-    });
+    let result: Result<(), rustc_public::CompilerError<TestResult>> =
+        rustc_public::run!(&rustc_args, || {
+            match snapcrab::run_function(start_fn) {
+                Ok(value) => std::ops::ControlFlow::Break(TestResult::SuccessWithValue(value)),
+                Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
+            }
+        });
 
     match result {
         Ok(_) => TestResult::Success, // This shouldn't happen with our new logic

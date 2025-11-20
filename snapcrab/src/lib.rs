@@ -117,7 +117,7 @@ pub fn run(instance: Instance) -> Result<ExitCode> {
 
     // Convert the result value to an exit code
     match result {
-        val if val.as_u128() == Some(0) || val.is_unit() => Ok(ExitCode::SUCCESS),
+        val if val.as_type::<u128>() == Some(0) || val.is_unit() => Ok(ExitCode::SUCCESS),
         _ => Ok(ExitCode::FAILURE),
     }
 }

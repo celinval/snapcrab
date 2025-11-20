@@ -159,8 +159,10 @@ impl FnInterpreter {
             TerminatorKind::SwitchInt { discr, targets } => {
                 let discr_value = self.evaluate_operand(&discr)?;
                 let discr_int = match discr_value {
-                    val if val.as_i128().is_some() => val.as_i128().unwrap() as u128,
-                    val if val.as_u128().is_some() => val.as_u128().unwrap(),
+                    val if val.as_type::<i128>().is_some() => {
+                        val.as_type::<i128>().unwrap() as u128
+                    }
+                    val if val.as_type::<u128>().is_some() => val.as_type::<u128>().unwrap(),
                     val if val.as_bool().is_some() => {
                         if val.as_bool().unwrap() {
                             1
@@ -265,38 +267,14 @@ impl FnInterpreter {
         match const_.kind() {
             ConstantKind::Allocated(alloc) => {
                 let bytes = alloc.raw_bytes()?;
-                // Use the MIR type info to determine signed vs unsigned
-                match const_.ty().kind() {
-                    TyKind::RigidTy(RigidTy::Int(int_ty)) => {
-                        use rustc_public::ty::IntTy;
-                        match int_ty {
-                            IntTy::I8 => Ok(Value::from_i8(i8::from_le_bytes([bytes[0]]))),
-                            IntTy::I16 => Ok(Value::from_i16(i16::from_le_bytes([bytes[0], bytes[1]]))),
-                            IntTy::I32 => Ok(Value::from_i32(i32::from_le_bytes(bytes.try_into().unwrap()))),
-                            IntTy::I64 | IntTy::Isize => Ok(Value::from_i64(i64::from_le_bytes(bytes.try_into().unwrap()))),
-                            IntTy::I128 => Ok(Value::from_i128(i128::from_le_bytes(bytes.try_into().unwrap()))),
-                        }
-                    }
-                    TyKind::RigidTy(RigidTy::Uint(uint_ty)) => {
-                        use rustc_public::ty::UintTy;
-                        match uint_ty {
-                            UintTy::U8 => Ok(Value::from_u8(bytes[0])),
-                            UintTy::U16 => Ok(Value::from_u16(u16::from_le_bytes([bytes[0], bytes[1]]))),
-                            UintTy::U32 => Ok(Value::from_u32(u32::from_le_bytes(bytes.try_into().unwrap()))),
-                            UintTy::U64 | UintTy::Usize => Ok(Value::from_u64(u64::from_le_bytes(bytes.try_into().unwrap()))),
-                            UintTy::U128 => Ok(Value::from_u128(u128::from_le_bytes(bytes.try_into().unwrap()))),
-                        }
-                    }
-                    TyKind::RigidTy(RigidTy::Bool) => Ok(Value::from_bool(bytes[0] != 0)),
-                    _ => bail!("Unsupported constant type: {:?}", const_.ty()),
-                }
+                Ok(Value::from_bytes(&bytes))
             }
             ConstantKind::ZeroSized => Ok(Value::unit().clone()),
             ConstantKind::Ty(ty_const) => {
-                bail!("Unsupported type constant: {:?}", ty_const);
+                bail!("Unexpected type constant: {:?}", ty_const);
             }
             ConstantKind::Param(_) => {
-                bail!("Parameter constants not supported");
+                bail!("Unexpected parameter constants not supported");
             }
             ConstantKind::Unevaluated(_) => {
                 bail!("Unexpected unevaluated constants on instance body");
