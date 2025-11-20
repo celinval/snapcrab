@@ -54,6 +54,41 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_simple_tuple_ops,
+    input = "tuple_operations.rs", 
+    start_fn = "simple_tuple",
+    result = TestResult::SuccessWithValue(Value::from_bytes(&[1, 42, 0, 0, 232, 3, 0, 0]))
+);
+
+check_custom_start!(
+    test_unit_tuple,
+    input = "tuple_operations.rs",
+    start_fn = "unit_tuple",
+    result = TestResult::SuccessWithValue(Value::unit().clone())
+);
+
+check_custom_start!(
+    test_single_element_tuple,
+    input = "tuple_operations.rs", 
+    start_fn = "single_element_tuple",
+    result = TestResult::SuccessWithValue(Value::from_i32(42))
+);
+
+check_custom_start!(
+    test_reordered_tuple,
+    input = "tuple_operations.rs",
+    start_fn = "reordered_tuple",
+    result = TestResult::SuccessWithValue(Value::from_bytes(&[232, 3, 0, 0, 42, 1, 0, 0]))
+);
+
+check_custom_start!(
+    test_another_order,
+    input = "tuple_operations.rs", 
+    start_fn = "another_order",
+    result = TestResult::SuccessWithValue(Value::from_bytes(&[232, 3, 0, 0, 1, 42, 0, 0]))
+);
+
+check_custom_start!(
     test_bool_return,
     input = "bool_function.rs",
     start_fn = "returns_true",
