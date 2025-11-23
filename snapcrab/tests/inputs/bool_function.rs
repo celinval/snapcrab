@@ -1,7 +1,3 @@
-fn returns_true() -> bool {
+pub fn returns_true() -> bool {
     true
-}
-
-fn main() {
-    println!("Main function");
 }

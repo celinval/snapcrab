@@ -36,8 +36,10 @@ impl PartialEq for TestResult {
 
 pub fn run_interpreter_test(input_file: &Path) -> TestResult {
     // Set up rustc environment to compile the input file
+    // Main function tests use bin crate type
     let rustc_args = vec![
         "snapcrab".to_string(),
+        "--crate-type=bin".to_string(),
         input_file.to_string_lossy().to_string(),
     ];
 
@@ -63,8 +65,10 @@ pub fn run_interpreter_test(input_file: &Path) -> TestResult {
 
 pub fn run_custom_start_test(input_file: &Path, start_fn: &str) -> TestResult {
     // Set up rustc environment to compile the input file
+    // Custom function tests use lib crate type
     let rustc_args = vec![
         "snapcrab".to_string(),
+        "--crate-type=lib".to_string(),
         input_file.to_string_lossy().to_string(),
     ];
 
