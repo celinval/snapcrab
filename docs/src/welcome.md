@@ -1,6 +1,7 @@
 # Welcome to SnapCrab
 
-SnapCrab is an experimental Rust interpreter designed to accelerate local development by executing Rust code without the overhead of compilation and linking.
+SnapCrab is an experimental Rust interpreter designed to accelerate local
+development by executing Rust code without the overhead of compilation and linking.
 
 ## What is SnapCrab?
 

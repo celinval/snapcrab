@@ -36,3 +36,18 @@ Key responsibilities:
 - Handle mixed compilation scenarios (compiled deps + interpreted target)
 
 This approach will allow SnapCrab to leverage the existing Rust ecosystem while providing fast execution for the code under development.
+
+## Memory Tracking and Safety
+
+The main goal of the interpreter architecture is speed.
+With that in mind, UB (Undefined Behavior) checking is limited and done in a best effort approach,
+mostly to avoid the interpreter execution from triggering UB.
+
+Memory access is tracked by recording allocated memory regions with their addresses and sizes. 
+However, there's no provenance or ownership tracking -
+the system focuses on bounds checking rather than Rust's ownership semantics.
+All allocated memories are initialized to zero to avoid reading uninitialized memory.
+Each stack frame is tracked as a single allocation containing all local variables in a contiguous byte array.
+
+This approach prioritizes execution speed while providing basic memory safety guarantees.
+To check for UB, we recommend using [MIRI](https://github.com/rust-lang/miri/).
