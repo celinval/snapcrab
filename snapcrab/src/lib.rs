@@ -11,6 +11,7 @@ extern crate rustc_public;
 
 pub mod heap;
 pub mod interpreter;
+pub mod memory;
 pub mod stack;
 pub mod ty;
 pub mod value;
@@ -91,11 +92,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
         value: result.as_bytes(),
     };
 
-    println!(
-        "Function '{}' returned: {}",
-        fn_name,
-        typed_result
-    );
+    println!("Function '{}' returned: {}", fn_name, typed_result);
 
     Ok(result)
 }

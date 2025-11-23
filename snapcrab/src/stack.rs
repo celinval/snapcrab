@@ -12,6 +12,7 @@
 //! Downside:
 //! - It makes it harder to check for buffer overflow.
 
+use crate::memory::global_memory_tracker;
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::Result;
@@ -41,10 +42,16 @@ impl StackFrame {
             current_offset += local.ty.size()?;
         }
 
-        Ok(Self {
-            data: vec![0; current_offset],
-            offsets,
-        })
+        let data = vec![0; current_offset];
+
+        // Register with global memory tracker
+        let address = data.as_ptr() as usize;
+        global_memory_tracker()
+            .lock()
+            .unwrap()
+            .allocate(address, data.len())?;
+
+        Ok(Self { data, offsets })
     }
 
     /// Sets a local variable to the given value
@@ -78,5 +85,14 @@ impl StackFrame {
 
         let bytes = &self.data[offset..next_offset];
         Ok(Value::from_bytes(bytes))
+    }
+}
+
+impl Drop for StackFrame {
+    fn drop(&mut self) {
+        let address = self.data.as_ptr() as usize;
+        if let Ok(mut tracker) = global_memory_tracker().lock() {
+            let _ = tracker.deallocate(address);
+        }
     }
 }

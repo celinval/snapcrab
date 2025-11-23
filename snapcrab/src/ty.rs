@@ -10,8 +10,6 @@ pub trait MonoType {
 impl MonoType for Ty {
     /// Get the size in bytes of a type
     fn size(&self) -> Result<usize> {
-        Ok(self
-            .layout()
-            .map(|layout| layout.shape().size.bytes())?)
+        Ok(self.layout().map(|layout| layout.shape().size.bytes())?)
     }
 }

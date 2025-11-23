@@ -70,7 +70,13 @@ impl std::fmt::Display for TypedValue<'_> {
         // Early length validation - return error for insufficient bytes
         let required_size = self.ty.size().unwrap_or(0);
         if self.value.len() < required_size {
-            return write!(f, "InvalidValue({}, expected {} bytes, got {})", self.ty, required_size, self.value.len());
+            return write!(
+                f,
+                "InvalidValue({}, expected {} bytes, got {})",
+                self.ty,
+                required_size,
+                self.value.len()
+            );
         }
 
         match self.ty.kind() {
@@ -82,7 +88,9 @@ impl std::fmt::Display for TypedValue<'_> {
                     IntTy::I8 => write!(f, "{}", i8::read_from_bytes(self.value).unwrap()),
                     IntTy::I16 => write!(f, "{}", i16::read_from_bytes(self.value).unwrap()),
                     IntTy::I32 => write!(f, "{}", i32::read_from_bytes(self.value).unwrap()),
-                    IntTy::I64 | IntTy::Isize => write!(f, "{}", i64::read_from_bytes(self.value).unwrap()),
+                    IntTy::I64 | IntTy::Isize => {
+                        write!(f, "{}", i64::read_from_bytes(self.value).unwrap())
+                    }
                     IntTy::I128 => write!(f, "{}", i128::read_from_bytes(self.value).unwrap()),
                 }
             }
@@ -92,7 +100,9 @@ impl std::fmt::Display for TypedValue<'_> {
                     UintTy::U8 => write!(f, "{}", u8::read_from_bytes(self.value).unwrap()),
                     UintTy::U16 => write!(f, "{}", u16::read_from_bytes(self.value).unwrap()),
                     UintTy::U32 => write!(f, "{}", u32::read_from_bytes(self.value).unwrap()),
-                    UintTy::U64 | UintTy::Usize => write!(f, "{}", u64::read_from_bytes(self.value).unwrap()),
+                    UintTy::U64 | UintTy::Usize => {
+                        write!(f, "{}", u64::read_from_bytes(self.value).unwrap())
+                    }
                     UintTy::U128 => write!(f, "{}", u128::read_from_bytes(self.value).unwrap()),
                 }
             }
