@@ -46,7 +46,14 @@ fn main() -> ExitCode {
     println!("Experimental Rust interpreter for fast development iteration");
 
     // Build rustc args from input file
-    let rustc_args = vec!["snapcrab".to_string(), args.input];
+    let mut rustc_args = vec!["snapcrab".to_string()];
+
+    // Add --crate-type=lib only if using custom start function
+    if args.start_fn.is_some() {
+        rustc_args.push("--crate-type=lib".to_string());
+    }
+
+    rustc_args.push(args.input);
 
     let result = run!(&rustc_args, || start_interpreter(args.start_fn));
 
