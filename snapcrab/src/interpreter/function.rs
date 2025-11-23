@@ -37,9 +37,9 @@ impl FnInterpreter {
             .body()
             .ok_or_else(|| anyhow::anyhow!("No body for instance"))?;
 
-        let frame_size = body.locals().len();
+        let frame = StackFrame::new(&body)?;
         Ok(Self {
-            frame: vec![None; frame_size],
+            frame,
             current_block: 0,
             instance,
             body,
@@ -70,7 +70,7 @@ impl FnInterpreter {
 
         // Initialize arguments in locals (skip local 0 which is return value)
         for (i, arg) in args.into_iter().enumerate() {
-            self.frame[i + 1] = Some(arg);
+            self.frame.set_local(i + 1, arg)?;
         }
 
         loop {
@@ -152,7 +152,7 @@ impl FnInterpreter {
         match terminator.kind.clone() {
             TerminatorKind::Return => {
                 // Return the value from local 0 (return value)
-                let return_value = self.read_from_place(&Place::from(0))?.clone();
+                let return_value = self.read_from_place(&Place::from(0))?;
                 Ok(ControlFlow::Return(return_value))
             }
             TerminatorKind::Goto { target } => Ok(ControlFlow::Continue(target)),
@@ -250,7 +250,7 @@ impl FnInterpreter {
     /// * `Err(anyhow::Error)` - If evaluation fails
     pub(super) fn evaluate_operand(&self, operand: &Operand) -> Result<Value> {
         match operand {
-            Operand::Copy(place) | Operand::Move(place) => Ok(self.read_from_place(place)?.clone()),
+            Operand::Copy(place) | Operand::Move(place) => self.read_from_place(place),
             Operand::Constant(const_op) => self.evaluate_constant(&const_op.const_),
         }
     }
@@ -298,11 +298,7 @@ impl FnInterpreter {
 
         debug!("Assigning {:?} to local {}", value, place.local);
 
-        if place.local >= self.frame.len() {
-            bail!("Local index {} out of bounds", place.local);
-        }
-
-        self.frame[place.local] = Some(value);
+        self.frame.set_local(place.local, value)?;
         Ok(())
     }
 
@@ -315,27 +311,24 @@ impl FnInterpreter {
     /// * `place` - The place to read from
     ///
     /// # Returns
-    /// * `Ok(&Value)` - Reference to the value at the place
+    /// * `Ok(Value)` - The value at the place
     /// * `Err(anyhow::Error)` - If place is uninitialized or out of bounds
-    fn read_from_place(&self, place: &Place) -> Result<&Value> {
+    fn read_from_place(&self, place: &Place) -> Result<Value> {
         if !place.projection.is_empty() {
             bail!("Place projections not yet supported");
-        }
-
-        if place.local >= self.frame.len() {
-            bail!("Local index {} out of bounds", place.local);
         }
 
         // Check if this is a zero-sized type
         let local_ty = self.body.locals()[place.local].ty;
         if matches!(local_ty.kind(), TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty()) {
-            // For zero-sized types, return a reference to the unit value
-            return Ok(Value::unit());
+            // For zero-sized types, return the unit value
+            return Ok(Value::unit().clone());
         }
 
-        self.frame[place.local]
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Uninitialized local: {}", place.local))
+        match self.frame.get_local(place.local) {
+            Ok(value) => Ok(value),
+            Err(_) => bail!("Uninitialized local: {}", place.local),
+        }
     }
 }
 
