@@ -75,7 +75,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
     }
 
     // Execute function
-    let interpreter = FnInterpreter::new(instance.clone())?;
+    let interpreter = FnInterpreter::new(instance)?;
     let mut heap = Heap::new();
     let result = interpreter.run(&mut heap, vec![])?;
 
@@ -94,7 +94,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
     println!(
         "Function '{}' returned: {}",
         fn_name,
-        typed_result.to_string()
+        typed_result
     );
 
     Ok(result)

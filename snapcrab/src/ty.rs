@@ -12,6 +12,6 @@ impl MonoType for Ty {
     fn size(&self) -> Result<usize> {
         Ok(self
             .layout()
-            .map(|layout| layout.shape().size.bytes() as usize)?)
+            .map(|layout| layout.shape().size.bytes())?)
     }
 }

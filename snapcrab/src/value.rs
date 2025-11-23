@@ -49,7 +49,7 @@ impl TypedValue<'_> {
             FieldsShape::Arbitrary { offsets } => {
                 if let Some(field_offset) = offsets.get(field_idx) {
                     let field_size = field_ty.size()?;
-                    let offset = field_offset.bytes() as usize;
+                    let offset = field_offset.bytes();
                     if offset + field_size <= self.value.len() {
                         let field_data =
                             SmallVec::from_slice(&self.value[offset..offset + field_size]);
@@ -65,57 +65,44 @@ impl TypedValue<'_> {
     }
 }
 
-impl ToString for TypedValue<'_> {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for TypedValue<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Early length validation - return error for insufficient bytes
         let required_size = self.ty.size().unwrap_or(0);
         if self.value.len() < required_size {
-            return format!(
-                "InvalidValue({}, expected {} bytes, got {})",
-                self.ty,
-                required_size,
-                self.value.len()
-            );
+            return write!(f, "InvalidValue({}, expected {} bytes, got {})", self.ty, required_size, self.value.len());
         }
 
         match self.ty.kind() {
             // Primitive types using zerocopy for efficient parsing
-            TyKind::RigidTy(RigidTy::Bool) => (self.value[0] != 0).to_string(),
+            TyKind::RigidTy(RigidTy::Bool) => write!(f, "{}", self.value[0] != 0),
             TyKind::RigidTy(RigidTy::Int(int_ty)) => {
                 use rustc_public::ty::IntTy;
                 match int_ty {
-                    IntTy::I8 => i8::read_from_bytes(self.value).unwrap().to_string(),
-                    IntTy::I16 => i16::read_from_bytes(self.value).unwrap().to_string(),
-                    IntTy::I32 => i32::read_from_bytes(self.value).unwrap().to_string(),
-                    IntTy::I64 | IntTy::Isize => {
-                        i64::read_from_bytes(self.value).unwrap().to_string()
-                    }
-                    IntTy::I128 => i128::read_from_bytes(self.value).unwrap().to_string(),
+                    IntTy::I8 => write!(f, "{}", i8::read_from_bytes(self.value).unwrap()),
+                    IntTy::I16 => write!(f, "{}", i16::read_from_bytes(self.value).unwrap()),
+                    IntTy::I32 => write!(f, "{}", i32::read_from_bytes(self.value).unwrap()),
+                    IntTy::I64 | IntTy::Isize => write!(f, "{}", i64::read_from_bytes(self.value).unwrap()),
+                    IntTy::I128 => write!(f, "{}", i128::read_from_bytes(self.value).unwrap()),
                 }
             }
             TyKind::RigidTy(RigidTy::Uint(uint_ty)) => {
                 use rustc_public::ty::UintTy;
                 match uint_ty {
-                    UintTy::U8 => u8::read_from_bytes(self.value).unwrap().to_string(),
-                    UintTy::U16 => u16::read_from_bytes(self.value).unwrap().to_string(),
-                    UintTy::U32 => u32::read_from_bytes(self.value).unwrap().to_string(),
-                    UintTy::U64 | UintTy::Usize => {
-                        u64::read_from_bytes(self.value).unwrap().to_string()
-                    }
-                    UintTy::U128 => u128::read_from_bytes(self.value).unwrap().to_string(),
+                    UintTy::U8 => write!(f, "{}", u8::read_from_bytes(self.value).unwrap()),
+                    UintTy::U16 => write!(f, "{}", u16::read_from_bytes(self.value).unwrap()),
+                    UintTy::U32 => write!(f, "{}", u32::read_from_bytes(self.value).unwrap()),
+                    UintTy::U64 | UintTy::Usize => write!(f, "{}", u64::read_from_bytes(self.value).unwrap()),
+                    UintTy::U128 => write!(f, "{}", u128::read_from_bytes(self.value).unwrap()),
                 }
             }
-            TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty() => "()".to_string(),
+            TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty() => write!(f, "()"),
             TyKind::RigidTy(RigidTy::Tuple(fields)) => {
-                // For non-empty tuples, use actual ABI layout
-                let mut result = String::from("(");
-
-                // Use declaration order per user expectation
+                write!(f, "(")?;
                 for (i, field_ty) in fields.iter().enumerate() {
                     if i > 0 {
-                        result.push_str(", ");
+                        write!(f, ", ")?;
                     }
-
                     let field_value = self
                         .extract_field_value(field_ty, i)
                         .unwrap_or_else(|_| Value::unit().clone());
@@ -123,29 +110,21 @@ impl ToString for TypedValue<'_> {
                         ty: *field_ty,
                         value: &field_value.data,
                     };
-                    result.push_str(&typed_field.to_string());
+                    write!(f, "{}", typed_field)?;
                 }
-
-                result.push(')');
-                result
+                write!(f, ")")
             }
-            // Pointers and references
             TyKind::RigidTy(RigidTy::RawPtr(_, _)) | TyKind::RigidTy(RigidTy::Ref(_, _, _)) => {
-                format!("0x{:x}", usize::read_from_bytes(self.value).unwrap())
+                write!(f, "0x{:x}", usize::read_from_bytes(self.value).unwrap())
             }
-            // Arrays
             TyKind::RigidTy(RigidTy::Array(elem_ty, len)) => {
-                // For now, just show array info - full element printing would need more complex logic
-                format!("[{}; {:?}]", elem_ty, len)
+                write!(f, "[{}; {:?}]", elem_ty, len)
             }
-            // Strings (for future implementation)
             TyKind::RigidTy(RigidTy::Str) => {
-                // Would need to interpret binary representation as UTF-8
-                "\"<string>\"".to_string()
+                write!(f, "\"<string>\"")
             }
-            // Unsupported types
             _ => {
-                format!("Unsupported({})", self.ty)
+                write!(f, "Unsupported({})", self.ty)
             }
         }
     }
@@ -177,12 +156,12 @@ impl Value {
         let layout = ty.layout()?;
         let shape = layout.shape();
         if let rustc_public::abi::FieldsShape::Arbitrary { offsets } = &shape.fields {
-            let total_size = shape.size.bytes() as usize;
+            let total_size = shape.size.bytes();
             let mut data = SmallVec::from_elem(0u8, total_size);
 
             for (i, value) in values.iter().enumerate() {
                 if let Some(offset) = offsets.get(i) {
-                    let offset = offset.bytes() as usize;
+                    let offset = offset.bytes();
                     let end = offset + value.data.len();
                     if end <= data.len() {
                         data[offset..end].copy_from_slice(&value.data);
