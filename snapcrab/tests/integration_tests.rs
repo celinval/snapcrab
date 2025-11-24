@@ -146,6 +146,13 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_tuple_field_sub,
+    input = "tuple_operations.rs",
+    start_fn = "tuple_field_sub",
+    result = TestResult::SuccessWithValue(Value::from_type(42i8))
+);
+
+check_custom_start!(
     test_nonexistent_function_fails,
     input = "valid_custom_start.rs",
     start_fn = "nonexistent_function",

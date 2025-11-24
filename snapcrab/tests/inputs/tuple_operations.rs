@@ -27,3 +27,8 @@ pub fn reordered_tuple() -> (u32, u8, bool) {
 pub fn another_order() -> (bool, u32, u8) {
     (true, 1000, 42)
 }
+
+pub fn tuple_field_sub() -> i8 {
+    let tuple = (52i8, 100i32, 10i8);
+    tuple.0.wrapping_sub(tuple.2)
+}

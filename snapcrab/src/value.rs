@@ -9,19 +9,6 @@ use zerocopy::{FromBytes, IntoBytes};
 #[allow(dead_code)]
 pub type Local = usize;
 
-/// Type information for values during interpretation.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ValueType {
-    /// Signed integer types
-    Int,
-    /// Unsigned integer types  
-    Uint,
-    /// Boolean type
-    Bool,
-    /// Unit type () - zero-sized
-    Unit,
-}
-
 /// Runtime value with binary representation and size information.
 ///
 /// Uses SmallVec to avoid heap allocations for values ≤16 bytes,

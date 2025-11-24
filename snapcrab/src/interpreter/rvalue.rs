@@ -1,7 +1,9 @@
-use crate::value::{Value, ValueType};
-use anyhow::{Result, bail};
+use crate::value::Value;
+use anyhow::{Result, anyhow, bail};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
 use rustc_public::mir::{BinOp, Rvalue, UnOp};
-use rustc_public::ty::{RigidTy, Ty, TyKind};
+use rustc_public::ty::{IntTy, RigidTy, Ty, UintTy};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 /// Trait for evaluating binary operations on values.
 pub trait BinaryEval {
@@ -15,7 +17,7 @@ pub trait BinaryEval {
     /// # Returns
     /// * `Ok(Value)` - Result of the operation
     /// * `Err(anyhow::Error)` - If operation fails or is unsupported
-    fn eval(&self, left: Value, right: Value, result_type: ValueType) -> Result<Value>;
+    fn eval(&self, left: &Value, right: &Value, result_type: RigidTy) -> Result<Value>;
 }
 
 /// Trait for evaluating unary operations on values.
@@ -29,132 +31,110 @@ pub trait UnaryEval {
     /// # Returns
     /// * `Ok(Value)` - Result of the operation
     /// * `Err(anyhow::Error)` - If operation fails or is unsupported
-    fn eval(&self, operand: Value, result_type: ValueType) -> Result<Value>;
+    fn eval(&self, operand: &Value, result_type: RigidTy) -> Result<Value>;
 }
 
 impl BinaryEval for BinOp {
-    fn eval(&self, left: Value, right: Value, result_type: ValueType) -> Result<Value> {
+    fn eval(&self, left: &Value, right: &Value, result_type: RigidTy) -> Result<Value> {
         match result_type {
-            ValueType::Int => {
-                let l = left
-                    .as_type::<i128>()
-                    .ok_or_else(|| anyhow::anyhow!("Expected i128 for left operand"))?;
-                let r = right
-                    .as_type::<i128>()
-                    .ok_or_else(|| anyhow::anyhow!("Expected i128 for right operand"))?;
-                eval_int_binop(*self, l, r)
-            }
-            ValueType::Uint => {
-                let l = left
-                    .as_type::<u128>()
-                    .ok_or_else(|| anyhow::anyhow!("Expected u128 for left operand"))?;
-                let r = right
-                    .as_type::<u128>()
-                    .ok_or_else(|| anyhow::anyhow!("Expected u128 for right operand"))?;
-                eval_uint_binop(*self, l, r)
-            }
-            ValueType::Bool => {
-                let l = left
-                    .as_bool()
-                    .ok_or_else(|| anyhow::anyhow!("Expected bool for left operand"))?;
-                let r = right
-                    .as_bool()
-                    .ok_or_else(|| anyhow::anyhow!("Expected bool for right operand"))?;
-                eval_bool_binop(*self, l, r)
-            }
-            ValueType::Unit => bail!("Cannot perform binary operations on unit type"),
+            RigidTy::Int(int_ty) => match int_ty {
+                IntTy::I8 => eval_int_binop::<i8>(*self, left, right),
+                IntTy::I16 => eval_int_binop::<i16>(*self, left, right),
+                IntTy::I32 => eval_int_binop::<i32>(*self, left, right),
+                IntTy::I64 => eval_int_binop::<i64>(*self, left, right),
+                IntTy::I128 => eval_int_binop::<i128>(*self, left, right),
+                IntTy::Isize => eval_int_binop::<isize>(*self, left, right),
+            },
+            RigidTy::Uint(uint_ty) => match uint_ty {
+                UintTy::U8 => eval_int_binop::<u8>(*self, left, right),
+                UintTy::U16 => eval_int_binop::<u16>(*self, left, right),
+                UintTy::U32 => eval_int_binop::<u32>(*self, left, right),
+                UintTy::U64 => eval_int_binop::<u64>(*self, left, right),
+                UintTy::U128 => eval_int_binop::<u128>(*self, left, right),
+                UintTy::Usize => eval_int_binop::<usize>(*self, left, right),
+            },
+            RigidTy::Bool => eval_bool_binop(*self, left, right),
+            _ => bail!(
+                "Unsupported binary operation `{self:?}` on `{}` type",
+                Ty::from_rigid_kind(result_type)
+            ),
         }
     }
 }
 
 impl UnaryEval for UnOp {
-    fn eval(&self, operand: Value, result_type: ValueType) -> Result<Value> {
+    fn eval(&self, operand: &Value, result_type: RigidTy) -> Result<Value> {
         match result_type {
-            ValueType::Int => {
-                let val = operand
-                    .as_type::<i128>()
-                    .ok_or_else(|| anyhow::anyhow!("Expected i128 for operand"))?;
-                eval_int_unop(*self, val)
-            }
-            ValueType::Bool => {
-                let val = operand
-                    .as_bool()
-                    .ok_or_else(|| anyhow::anyhow!("Expected bool for operand"))?;
-                eval_bool_unop(*self, val)
-            }
-            ValueType::Uint => bail!("Unary operations on unsigned integers not supported"),
-            ValueType::Unit => bail!("Cannot perform unary operations on unit type"),
+            RigidTy::Int(int_ty) => match int_ty {
+                IntTy::I8 => eval_int_unop::<i8>(*self, operand),
+                IntTy::I16 => eval_int_unop::<i16>(*self, operand),
+                IntTy::I32 => eval_int_unop::<i32>(*self, operand),
+                IntTy::I64 => eval_int_unop::<i64>(*self, operand),
+                IntTy::I128 => eval_int_unop::<i128>(*self, operand),
+                IntTy::Isize => eval_int_unop::<isize>(*self, operand),
+            },
+            RigidTy::Bool => eval_bool_unop(*self, operand),
+            RigidTy::Uint(_) => bail!("Unary operations on unsigned integers not supported"),
+            _ => bail!(
+                "Unsupported operation `{self:?}` on `{}` type",
+                Ty::from_rigid_kind(result_type)
+            ),
         }
     }
 }
 
 /// Evaluates a binary operation on signed integers.
-fn eval_int_binop(op: BinOp, left: i128, right: i128) -> Result<Value> {
-    match op {
-        BinOp::Add => left
-            .checked_add(right)
-            .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in addition")),
-        BinOp::Sub => left
-            .checked_sub(right)
-            .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in subtraction")),
-        BinOp::Mul => left
-            .checked_mul(right)
-            .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in multiplication")),
+fn eval_int_binop<T>(op: BinOp, l: &Value, r: &Value) -> Result<Value>
+where
+    T: FromBytes
+        + IntoBytes
+        + Immutable
+        + CheckedAdd
+        + CheckedDiv
+        + CheckedMul
+        + CheckedSub
+        + PartialEq
+        + Zero,
+{
+    let left = l.as_type::<T>().unwrap();
+    let right = r.as_type::<T>().unwrap();
+    let result = match op {
+        BinOp::Add => left.checked_add(&right),
+        BinOp::Sub => left.checked_sub(&right),
+        BinOp::Mul => left.checked_mul(&right),
         BinOp::Div => {
-            if right == 0 {
+            if right == <T as Zero>::zero() {
                 bail!("Division by zero");
             }
-            left.checked_div(right)
-                .map(Value::from_type)
-                .ok_or_else(|| anyhow::anyhow!("Integer overflow in division"))
+            left.checked_div(&right)
         }
         _ => bail!("Unsupported integer binary operation: {:?}", op),
-    }
-}
-
-/// Evaluates a binary operation on unsigned integers.
-fn eval_uint_binop(op: BinOp, left: u128, right: u128) -> Result<Value> {
-    match op {
-        BinOp::Add => left
-            .checked_add(right)
-            .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in addition")),
-        BinOp::Sub => left
-            .checked_sub(right)
-            .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in subtraction")),
-        BinOp::Mul => left
-            .checked_mul(right)
-            .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in multiplication")),
-        BinOp::Div => {
-            if right == 0 {
-                bail!("Division by zero");
-            }
-            left.checked_div(right)
-                .map(Value::from_type)
-                .ok_or_else(|| anyhow::anyhow!("Integer overflow in division"))
-        }
-        _ => bail!("Unsupported unsigned integer binary operation: {:?}", op),
-    }
+    };
+    result
+        .map(|val| Value::from_type(val))
+        .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow"))
 }
 
 /// Evaluates a binary operation on boolean values.
-fn eval_bool_binop(op: BinOp, left: bool, right: bool) -> Result<Value> {
-    match op {
-        BinOp::BitAnd => Ok(Value::from_bool(left & right)),
-        BinOp::BitOr => Ok(Value::from_bool(left | right)),
-        BinOp::Eq => Ok(Value::from_bool(left == right)),
-        BinOp::Ne => Ok(Value::from_bool(left != right)),
+fn eval_bool_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value> {
+    let left = l.as_bool().unwrap();
+    let right = r.as_bool().unwrap();
+    let result = match op {
+        BinOp::BitAnd => left & right,
+        BinOp::BitOr => left | right,
+        BinOp::Eq => left == right,
+        BinOp::Ne => left != right,
         _ => bail!("Unsupported boolean binary operation: {:?}", op),
-    }
+    };
+    Ok(Value::from_bool(result))
 }
 
 /// Evaluates a unary operation on a signed integer.
-fn eval_int_unop(op: UnOp, val: i128) -> Result<Value> {
+fn eval_int_unop<T>(op: UnOp, v: &Value) -> Result<Value>
+where
+    T: FromBytes + IntoBytes + Immutable + CheckedNeg,
+{
+    let val = v.as_type::<T>().unwrap();
     match op {
         UnOp::Neg => val
             .checked_neg()
@@ -165,7 +145,8 @@ fn eval_int_unop(op: UnOp, val: i128) -> Result<Value> {
 }
 
 /// Evaluates a unary operation on a boolean value.
-fn eval_bool_unop(op: UnOp, val: bool) -> Result<Value> {
+fn eval_bool_unop(op: UnOp, v: &Value) -> Result<Value> {
+    let val = v.as_bool().unwrap();
     match op {
         UnOp::Not => Ok(Value::from_bool(!val)),
         _ => bail!("Unsupported boolean unary operation: {:?}", op),
@@ -173,17 +154,6 @@ fn eval_bool_unop(op: UnOp, val: bool) -> Result<Value> {
 }
 
 impl super::function::FnInterpreter {
-    /// Convert a MIR type to ValueType for operations
-    fn ty_to_value_type(&self, ty: Ty) -> Result<ValueType> {
-        match ty.kind() {
-            TyKind::RigidTy(RigidTy::Bool) => Ok(ValueType::Bool),
-            TyKind::RigidTy(RigidTy::Int(_)) => Ok(ValueType::Int),
-            TyKind::RigidTy(RigidTy::Uint(_)) => Ok(ValueType::Uint),
-            TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty() => Ok(ValueType::Unit),
-            _ => bail!("Unsupported type for operation: {:?}", ty),
-        }
-    }
-
     /// Evaluates an rvalue (right-hand side value) expression.
     ///
     /// # Arguments
@@ -197,13 +167,13 @@ impl super::function::FnInterpreter {
             Rvalue::BinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;
                 let right_val = self.evaluate_operand(right)?;
-                let result_type = self.ty_to_value_type(rvalue.ty(self.locals())?)?;
-                op.eval(left_val, right_val, result_type)
+                let result_type = rvalue.ty(self.locals())?.kind().rigid().unwrap().clone();
+                op.eval(&left_val, &right_val, result_type)
             }
             Rvalue::UnaryOp(op, operand) => {
                 let val = self.evaluate_operand(operand)?;
-                let result_type = self.ty_to_value_type(rvalue.ty(self.locals())?)?;
-                op.eval(val, result_type)
+                let result_type = rvalue.ty(self.locals())?.kind().rigid().unwrap().clone();
+                op.eval(&val, result_type)
             }
             Rvalue::Use(operand) => self.evaluate_operand(operand),
             Rvalue::Ref(_, _, place) => {
@@ -237,9 +207,9 @@ mod tests {
     fn test_int_binary_operations() {
         let result = BinOp::Add
             .eval(
-                Value::from_type(5i128),
-                Value::from_type(3i128),
-                ValueType::Int,
+                &Value::from_type(5i128),
+                &Value::from_type(3i128),
+                RigidTy::Int(IntTy::I128),
             )
             .unwrap();
         assert_eq!(result, Value::from_type(8i128));
@@ -248,9 +218,9 @@ mod tests {
     #[test]
     fn test_int_overflow() {
         let result = BinOp::Add.eval(
-            Value::from_type(i128::MAX),
-            Value::from_type(1i128),
-            ValueType::Int,
+            &Value::from_type(i128::MAX),
+            &Value::from_type(1i128),
+            RigidTy::Int(IntTy::I128),
         );
         assert!(result.is_err());
     }
@@ -260,9 +230,9 @@ mod tests {
         assert_eq!(
             BinOp::Add
                 .eval(
-                    Value::from_type(10u128),
-                    Value::from_type(5i128),
-                    ValueType::Uint
+                    &Value::from_type(10u128),
+                    &Value::from_type(5i128),
+                    RigidTy::Uint(UintTy::U128)
                 )
                 .unwrap(),
             Value::from_type(15u128)
@@ -270,9 +240,9 @@ mod tests {
         assert_eq!(
             BinOp::Sub
                 .eval(
-                    Value::from_type(10u128),
-                    Value::from_type(5i128),
-                    ValueType::Uint
+                    &Value::from_type(10u128),
+                    &Value::from_type(5i128),
+                    RigidTy::Uint(UintTy::U128)
                 )
                 .unwrap(),
             Value::from_type(5i128)
@@ -280,9 +250,9 @@ mod tests {
         assert_eq!(
             BinOp::Mul
                 .eval(
-                    Value::from_type(10u128),
-                    Value::from_type(5i128),
-                    ValueType::Uint
+                    &Value::from_type(10u128),
+                    &Value::from_type(5i128),
+                    RigidTy::Uint(UintTy::U128)
                 )
                 .unwrap(),
             Value::from_type(50u128)
@@ -290,9 +260,9 @@ mod tests {
         assert_eq!(
             BinOp::Div
                 .eval(
-                    Value::from_type(10u128),
-                    Value::from_type(5i128),
-                    ValueType::Uint
+                    &Value::from_type(10u128),
+                    &Value::from_type(5i128),
+                    RigidTy::Uint(UintTy::U128)
                 )
                 .unwrap(),
             Value::from_type(2u128)
@@ -304,18 +274,18 @@ mod tests {
         assert!(
             BinOp::Div
                 .eval(
-                    Value::from_type(10u128),
-                    Value::from_type(0i128),
-                    ValueType::Int
+                    &Value::from_type(10u128),
+                    &Value::from_type(0i128),
+                    RigidTy::Int(IntTy::I128)
                 )
                 .is_err()
         );
         assert!(
             BinOp::Div
                 .eval(
-                    Value::from_type(10u128),
-                    Value::from_type(0i128),
-                    ValueType::Uint
+                    &Value::from_type(10u128),
+                    &Value::from_type(0i128),
+                    RigidTy::Uint(UintTy::U128)
                 )
                 .is_err()
         );
@@ -326,9 +296,9 @@ mod tests {
         assert_eq!(
             BinOp::BitAnd
                 .eval(
-                    Value::from_bool(true),
-                    Value::from_bool(false),
-                    ValueType::Bool
+                    &Value::from_bool(true),
+                    &Value::from_bool(false),
+                    RigidTy::Bool
                 )
                 .unwrap(),
             Value::from_bool(false)
@@ -336,9 +306,9 @@ mod tests {
         assert_eq!(
             BinOp::BitOr
                 .eval(
-                    Value::from_bool(true),
-                    Value::from_bool(false),
-                    ValueType::Bool
+                    &Value::from_bool(true),
+                    &Value::from_bool(false),
+                    RigidTy::Bool
                 )
                 .unwrap(),
             Value::from_bool(true)
@@ -346,9 +316,9 @@ mod tests {
         assert_eq!(
             BinOp::Eq
                 .eval(
-                    Value::from_bool(true),
-                    Value::from_bool(true),
-                    ValueType::Bool
+                    &Value::from_bool(true),
+                    &Value::from_bool(true),
+                    RigidTy::Bool
                 )
                 .unwrap(),
             Value::from_bool(true)
@@ -359,15 +329,141 @@ mod tests {
     fn test_unary_operations() {
         assert_eq!(
             UnOp::Neg
-                .eval(Value::from_type(5i128), ValueType::Int)
+                .eval(&Value::from_type(5i128), RigidTy::Int(IntTy::I128))
                 .unwrap(),
             Value::from_type(-5i128)
         );
         assert_eq!(
             UnOp::Not
-                .eval(Value::from_bool(true), ValueType::Bool)
+                .eval(&Value::from_bool(true), RigidTy::Bool)
                 .unwrap(),
             Value::from_bool(false)
+        );
+    }
+
+    #[test]
+    fn test_different_int_sizes() {
+        // i8
+        assert_eq!(
+            BinOp::Add
+                .eval(
+                    &Value::from_type(5i8),
+                    &Value::from_type(3i8),
+                    RigidTy::Int(IntTy::I8)
+                )
+                .unwrap(),
+            Value::from_type(8i8)
+        );
+
+        // i16
+        assert_eq!(
+            BinOp::Mul
+                .eval(
+                    &Value::from_type(10i16),
+                    &Value::from_type(4i16),
+                    RigidTy::Int(IntTy::I16)
+                )
+                .unwrap(),
+            Value::from_type(40i16)
+        );
+
+        // i32
+        assert_eq!(
+            BinOp::Sub
+                .eval(
+                    &Value::from_type(100i32),
+                    &Value::from_type(25i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_type(75i32)
+        );
+
+        // i64
+        assert_eq!(
+            BinOp::Div
+                .eval(
+                    &Value::from_type(64i64),
+                    &Value::from_type(8i64),
+                    RigidTy::Int(IntTy::I64)
+                )
+                .unwrap(),
+            Value::from_type(8i64)
+        );
+
+        // isize
+        assert_eq!(
+            BinOp::Add
+                .eval(
+                    &Value::from_type(17isize),
+                    &Value::from_type(5isize),
+                    RigidTy::Int(IntTy::Isize)
+                )
+                .unwrap(),
+            Value::from_type(22isize)
+        );
+    }
+
+    #[test]
+    fn test_different_uint_sizes() {
+        // u8
+        assert_eq!(
+            BinOp::Add
+                .eval(
+                    &Value::from_type(200u8),
+                    &Value::from_type(50u8),
+                    RigidTy::Uint(UintTy::U8)
+                )
+                .unwrap(),
+            Value::from_type(250u8)
+        );
+
+        // u16
+        assert_eq!(
+            BinOp::Mul
+                .eval(
+                    &Value::from_type(300u16),
+                    &Value::from_type(2u16),
+                    RigidTy::Uint(UintTy::U16)
+                )
+                .unwrap(),
+            Value::from_type(600u16)
+        );
+
+        // u32
+        assert_eq!(
+            BinOp::Sub
+                .eval(
+                    &Value::from_type(1000u32),
+                    &Value::from_type(250u32),
+                    RigidTy::Uint(UintTy::U32)
+                )
+                .unwrap(),
+            Value::from_type(750u32)
+        );
+
+        // u64
+        assert_eq!(
+            BinOp::Div
+                .eval(
+                    &Value::from_type(1024u64),
+                    &Value::from_type(16u64),
+                    RigidTy::Uint(UintTy::U64)
+                )
+                .unwrap(),
+            Value::from_type(64u64)
+        );
+
+        // usize
+        assert_eq!(
+            BinOp::Mul
+                .eval(
+                    &Value::from_type(23usize),
+                    &Value::from_type(7usize),
+                    RigidTy::Uint(UintTy::Usize)
+                )
+                .unwrap(),
+            Value::from_type(161usize)
         );
     }
 }
