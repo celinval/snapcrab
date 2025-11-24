@@ -130,6 +130,21 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(Value::from_type(42i32))
 );
 
+#[cfg(target_endian = "little")]
+check_custom_start!(
+    test_tuple_field_ref,
+    input = "reference_test.rs",
+    start_fn = "test_tuple_field_ref",
+    result = TestResult::SuccessWithValue(Value::from_bytes(&[52, 10]))
+);
+
+check_custom_start!(
+    test_double_deref,
+    input = "reference_test.rs",
+    start_fn = "test_double_deref",
+    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CopyForDeref.*".to_string())
+);
+
 check_custom_start!(
     test_nonexistent_function_fails,
     input = "valid_custom_start.rs",

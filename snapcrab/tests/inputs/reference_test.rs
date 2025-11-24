@@ -32,3 +32,16 @@ pub fn test_mut_ref_chain() -> i32 {
     let r2 = &x;
     *r2
 }
+
+pub fn test_double_deref() -> i32 {
+    let x = 99;
+    let r1 = &x;
+    let r2 = &r1;
+    **r2
+}
+
+pub fn test_tuple_field_ref() -> (i8, i8) {
+    let tuple = (52i8, 100i32, 10i8);
+    let r = &tuple.0;
+    (*r, tuple.2)
+}

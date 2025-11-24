@@ -7,8 +7,9 @@
 use crate::memory;
 use crate::ty::MonoType;
 use crate::value::Value;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use rustc_public::mir::{Place, ProjectionElem};
+use rustc_public::ty::{RigidTy, TyKind};
 
 impl super::function::FnInterpreter {
     /// Assigns a value to a place (local variable or memory location).
@@ -21,24 +22,49 @@ impl super::function::FnInterpreter {
 
     /// Resolves a place to the address of the actual value.
     pub(super) fn resolve_place_addr(&self, place: &Place) -> Result<usize> {
-        if place.projection.is_empty() {
-            self.frame.get_local_address(place.local)
-        } else if place.projection.len() == 1 {
-            match &place.projection[0] {
-                ProjectionElem::Deref => {
-                    let deref_place = Place {
-                        local: place.local,
-                        projection: place.projection[1..].to_vec(),
-                    };
-                    let val = self.read_from_place(&deref_place)?;
-                    val.as_type()
-                        .ok_or_else(|| anyhow!("Expected address, but found {val:?}"))
+        let initial_addr = self.frame.get_local_address(place.local)?;
+        let initial_ty = self.locals()[place.local].ty;
+
+        let (final_addr, _) = place.projection.iter().try_fold(
+            (initial_addr, initial_ty),
+            |(current_addr, current_ty), projection| {
+                match projection {
+                    ProjectionElem::Deref => {
+                        // For deref, we need to get the pointee type first
+                        let pointee_ty = match current_ty.kind() {
+                            TyKind::RigidTy(RigidTy::Ref(_, pointee, _))
+                            | TyKind::RigidTy(RigidTy::RawPtr(pointee, _)) => pointee,
+                            _ => bail!("Cannot dereference non-pointer type: {:?}", current_ty),
+                        };
+
+                        // Read the pointer value at current_addr using memory tracker
+                        let ptr_value = memory::read_addr(current_addr, current_ty)?;
+                        let address = ptr_value
+                            .as_type::<usize>()
+                            .ok_or_else(|| anyhow::anyhow!("Expected usize pointer value"))?;
+
+                        Ok((address, pointee_ty))
+                    }
+                    ProjectionElem::Field(field_idx, field_ty) => {
+                        // Calculate field offset using type layout
+                        let layout = current_ty.layout()?;
+                        let field_offset = match layout.shape().fields {
+                            rustc_public::abi::FieldsShape::Arbitrary { ref offsets } => offsets
+                                .get(*field_idx)
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!("Field index {} out of bounds", field_idx)
+                                })?
+                                .bytes(),
+                            _ => bail!("Unsupported field layout for type: {:?}", current_ty),
+                        };
+                        Ok((current_addr + field_offset, *field_ty))
+                    }
+                    _ => bail!("Unsupported place projection: {:?}", projection),
                 }
-                _ => bail!("Unsupported place projection: {:?}", place.projection[0]),
-            }
-        } else {
-            bail!("Complex place projections not supported")
-        }
+            },
+        )?;
+
+        Ok(final_addr)
     }
 
     /// Reads a value from a place (local variable or memory location).
