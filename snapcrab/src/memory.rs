@@ -17,11 +17,11 @@ use std::sync::{Mutex, OnceLock};
 use std::{ptr, slice};
 
 /// Global singleton memory tracker instance
-static MEMORY_TRACKER: OnceLock<Mutex<MemoryTracker>> = OnceLock::new();
+static MEMORY_SANITIZER: OnceLock<Mutex<MemorySanitizer>> = OnceLock::new();
 
 /// Gets the global memory tracker instance
-pub fn global_memory_tracker() -> &'static Mutex<MemoryTracker> {
-    MEMORY_TRACKER.get_or_init(|| Mutex::new(MemoryTracker::new()))
+pub fn global_memory_tracker() -> &'static Mutex<MemorySanitizer> {
+    MEMORY_SANITIZER.get_or_init(|| Mutex::new(MemorySanitizer::new()))
 }
 
 /// Tracks memory allocations and validates memory access bounds.
@@ -29,12 +29,12 @@ pub fn global_memory_tracker() -> &'static Mutex<MemoryTracker> {
 /// Maintains a record of all allocated memory regions with their addresses and sizes.
 /// Prevents overlapping allocations and provides efficient bounds checking.
 #[derive(Debug, Default)]
-pub struct MemoryTracker {
+pub struct MemorySanitizer {
     /// Map from allocation start address to allocation size
     allocations: BTreeMap<usize, usize>,
 }
 
-impl MemoryTracker {
+impl MemorySanitizer {
     /// Creates a new empty memory tracker.
     pub fn new() -> Self {
         Self::default()
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_allocate_and_contains() {
-        let mut tracker = MemoryTracker::new();
+        let mut tracker = MemorySanitizer::new();
 
         // Allocate memory at address 100, size 50
         tracker.allocate(100, 50).unwrap();
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn test_overlapping_allocations() {
-        let mut tracker = MemoryTracker::new();
+        let mut tracker = MemorySanitizer::new();
 
         tracker.allocate(100, 50).unwrap();
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_deallocate() {
-        let mut tracker = MemoryTracker::new();
+        let mut tracker = MemorySanitizer::new();
 
         tracker.allocate(100, 50).unwrap();
         assert!(tracker.contains(125, 10));
