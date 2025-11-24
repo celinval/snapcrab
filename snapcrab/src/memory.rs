@@ -3,10 +3,18 @@
 //! Provides a memory tracker that records allocated memory regions and validates
 //! memory access bounds. Ensures no overlapping allocations and efficient
 //! bounds checking for memory safety.
+//!
+//! Note: For performance optimization, simple stack read/write operations could
+//! potentially bypass the global tracker lock in the future, since stack memory
+//! is inherently thread-local and bounds are pre-validated during frame creation.
 
+use crate::ty::MonoType;
+use crate::value::Value;
 use anyhow::{Result, bail};
+use rustc_public::ty::Ty;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
+use std::{ptr, slice};
 
 /// Global singleton memory tracker instance
 static MEMORY_TRACKER: OnceLock<Mutex<MemoryTracker>> = OnceLock::new();
@@ -110,6 +118,42 @@ impl MemoryTracker {
         }
         false
     }
+}
+
+/// Reads data from a memory address with bounds checking
+pub fn read_addr(address: usize, ty: Ty) -> Result<Value> {
+    let size = ty.size()?;
+    let tracker = global_memory_tracker().lock().unwrap();
+    if !tracker.contains(address, size) {
+        anyhow::bail!("Invalid memory read at 0x{:x}", address);
+    }
+
+    // SAFETY: Memory tracker verified this address range is valid
+    // and memory tracker is locked preventing competing operations
+    unsafe {
+        let slice = slice::from_raw_parts(address as *const u8, size);
+        Ok(Value::from_bytes(slice))
+    }
+}
+
+/// Writes data to a memory address with bounds checking
+pub fn write_addr(address: usize, data: &[u8], ty: Ty) -> Result<()> {
+    let size = ty.size()?;
+    if data.len() != size {
+        anyhow::bail!("Data size mismatch: expected {}, got {}", size, data.len());
+    }
+
+    let tracker = global_memory_tracker().lock().unwrap();
+    if !tracker.contains(address, size) {
+        anyhow::bail!("Invalid memory write at 0x{:x}", address);
+    }
+
+    // SAFETY: Memory tracker verified this address range is valid
+    // and memory tracker is locked preventing competing operations
+    unsafe {
+        ptr::copy(data.as_ptr(), address as *mut u8, size);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

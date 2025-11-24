@@ -206,6 +206,10 @@ impl super::function::FnInterpreter {
                 op.eval(val, result_type)
             }
             Rvalue::Use(operand) => self.evaluate_operand(operand),
+            Rvalue::Ref(_, _, place) => {
+                let address = self.resolve_place_addr(place)?;
+                Ok(Value::from_type(address))
+            }
             Rvalue::Aggregate(kind, operands) => match kind {
                 rustc_public::mir::AggregateKind::Tuple => {
                     let mut values = Vec::new();

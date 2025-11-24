@@ -14,7 +14,7 @@ use tracing::{debug, info};
 #[derive(Debug)]
 pub struct FnInterpreter {
     /// Stack frame containing local variable values
-    frame: StackFrame,
+    pub(super) frame: StackFrame,
     /// Index of the currently executing basic block
     current_block: BasicBlockIdx,
     /// Function instance being interpreted
@@ -279,55 +279,6 @@ impl FnInterpreter {
             ConstantKind::Unevaluated(_) => {
                 bail!("Unexpected unevaluated constants on instance body");
             }
-        }
-    }
-
-    /// Assigns a value to a place (local variable or memory location).
-    ///
-    /// # Arguments
-    /// * `place` - The place to assign to
-    /// * `value` - The value to assign
-    ///
-    /// # Returns
-    /// * `Ok(())` - Assignment successful
-    /// * `Err(anyhow::Error)` - If assignment fails (e.g., out of bounds)
-    fn assign_to_place(&mut self, place: &Place, value: Value) -> Result<()> {
-        if !place.projection.is_empty() {
-            bail!("Place projections not yet supported");
-        }
-
-        debug!("Assigning {:?} to local {}", value, place.local);
-
-        self.frame.set_local(place.local, value)?;
-        Ok(())
-    }
-
-    /// Reads a value from a place (local variable or memory location).
-    ///
-    /// For zero-sized types (like unit type `()`), returns `Value::unit()` even if
-    /// the local is uninitialized, since zero-sized values don't need storage.
-    ///
-    /// # Arguments
-    /// * `place` - The place to read from
-    ///
-    /// # Returns
-    /// * `Ok(Value)` - The value at the place
-    /// * `Err(anyhow::Error)` - If place is uninitialized or out of bounds
-    fn read_from_place(&self, place: &Place) -> Result<Value> {
-        if !place.projection.is_empty() {
-            bail!("Place projections not yet supported");
-        }
-
-        // Check if this is a zero-sized type
-        let local_ty = self.body.locals()[place.local].ty;
-        if matches!(local_ty.kind(), TyKind::RigidTy(RigidTy::Tuple(fields)) if fields.is_empty()) {
-            // For zero-sized types, return the unit value
-            return Ok(Value::unit().clone());
-        }
-
-        match self.frame.get_local(place.local) {
-            Ok(value) => Ok(value),
-            Err(_) => bail!("Uninitialized local: {}", place.local),
         }
     }
 }

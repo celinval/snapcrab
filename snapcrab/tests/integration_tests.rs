@@ -96,6 +96,41 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_mut_reference,
+    input = "reference_test.rs",
+    start_fn = "test_mut_ref",
+    result = TestResult::SuccessWithValue(Value::from_type(100i32))
+);
+
+check_custom_start!(
+    test_multiple_references,
+    input = "reference_test.rs",
+    start_fn = "test_multiple_refs",
+    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CheckedBinaryOp.*".to_string())
+);
+
+check_custom_start!(
+    test_reference_to_reference,
+    input = "reference_test.rs",
+    start_fn = "test_ref_to_ref",
+    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CopyForDeref.*".to_string())
+);
+
+check_custom_start!(
+    test_mutable_reference_chain,
+    input = "reference_test.rs",
+    start_fn = "test_mut_ref_chain",
+    result = TestResult::SuccessWithValue(Value::from_type(15i32))
+);
+
+check_custom_start!(
+    test_basic_reference,
+    input = "reference_test.rs",
+    start_fn = "test_basic_ref",
+    result = TestResult::SuccessWithValue(Value::from_type(42i32))
+);
+
+check_custom_start!(
     test_nonexistent_function_fails,
     input = "valid_custom_start.rs",
     start_fn = "nonexistent_function",

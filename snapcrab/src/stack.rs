@@ -86,6 +86,15 @@ impl StackFrame {
         let bytes = &self.data[offset..next_offset];
         Ok(Value::from_bytes(bytes))
     }
+
+    /// Gets the address of a local variable
+    pub fn get_local_address(&self, local: usize) -> Result<usize> {
+        if local >= self.offsets.len() {
+            anyhow::bail!("Local index {} out of bounds", local);
+        }
+        let offset = self.offsets[local];
+        Ok(self.data.as_ptr() as usize + offset)
+    }
 }
 
 impl Drop for StackFrame {
