@@ -1,5 +1,5 @@
 use crate::heap::Heap;
-use crate::stack::StackFrame;
+use crate::memory::stack::StackFrame;
 use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;

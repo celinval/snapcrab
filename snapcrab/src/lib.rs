@@ -12,7 +12,6 @@ extern crate rustc_public;
 pub mod heap;
 pub mod interpreter;
 pub mod memory;
-pub mod stack;
 pub mod ty;
 pub mod value;
 

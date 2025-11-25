@@ -12,9 +12,8 @@
 //! Downside:
 //! - It makes it harder to check for buffer overflow.
 
-use crate::memory::global_memory_tracker;
-use crate::ty::MonoType;
 use crate::value::Value;
+use crate::{memory::global_memory_tracker, ty::MonoType};
 use anyhow::Result;
 use rustc_public::mir::Body;
 
