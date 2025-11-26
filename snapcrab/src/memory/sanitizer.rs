@@ -3,22 +3,7 @@
 //! Provides a memory tracker that records allocated memory regions and validates
 //! memory access bounds. Ensures no overlapping allocations and efficient
 //! bounds checking for memory safety.
-//!
-//! Note: For performance optimization, simple stack read/write operations could
-//! potentially bypass the global tracker lock in the future, since stack memory
-//! is inherently thread-local and bounds are pre-validated during frame creation.
-
-use anyhow::{Result, bail};
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
-
-/// Global singleton memory tracker instance
-static MEMORY_SANITIZER: OnceLock<Mutex<MemorySanitizer>> = OnceLock::new();
-
-/// Gets the global memory tracker instance
-pub fn global_memory_tracker() -> &'static Mutex<MemorySanitizer> {
-    MEMORY_SANITIZER.get_or_init(|| Mutex::new(MemorySanitizer::new()))
-}
 
 /// Tracks memory allocations and validates memory access bounds.
 ///
@@ -31,45 +16,39 @@ pub struct MemorySanitizer {
 }
 
 impl MemorySanitizer {
-    /// Creates a new empty memory tracker.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Records a new memory allocation.
     ///
     /// # Arguments
-    /// * `address` - Starting address of the allocation
-    /// * `size` - Size of the allocation in bytes
-    ///
-    /// # Returns
-    /// * `Ok(())` - Allocation recorded successfully
-    /// * `Err(anyhow::Error)` - If allocation overlaps with existing memory
-    pub fn allocate(&mut self, address: usize, size: usize) -> Result<()> {
-        if self.has_overlap(address, size) {
-            bail!(
+    /// * `buf` - The buffer to be registered
+    pub fn register_alloc(&mut self, buf: &[u8]) {
+        let size = buf.len();
+        if size > 0 {
+            let address = buf.as_ptr() as usize;
+            // This shouldn't happen unless there is a bug which compromises
+            // safety. So, kaboom!
+            assert!(
+                !self.has_overlap(address, size),
                 "Allocation at 0x{:x} (size {}) overlaps with existing memory",
                 address,
                 size
             );
+            self.allocations.insert(address, size);
         }
-        self.allocations.insert(address, size);
-        Ok(())
     }
 
     /// Removes a memory allocation record.
     ///
     /// # Arguments
-    /// * `address` - Starting address of the allocation to remove
-    ///
-    /// # Returns
-    /// * `Ok(())` - Allocation removed successfully
-    /// * `Err(anyhow::Error)` - If no allocation exists at the given address
-    pub fn deallocate(&mut self, address: usize) -> Result<()> {
-        if self.allocations.remove(&address).is_none() {
-            bail!("No allocation found at address 0x{:x}", address);
+    /// * `buf`: The buffer to deregister
+    pub fn deregister_alloc(&mut self, buf: &[u8]) {
+        if !buf.is_empty() {
+            let address = buf.as_ptr() as usize;
+            if self.allocations.remove(&address).is_none() {
+                // This shouldn't happen unless there is a bug which compromises
+                // safety. So, kaboom!
+                panic!("No allocation found at address 0x{:x}", address);
+            }
         }
-        Ok(())
     }
 
     /// Checks if a memory range is entirely contained within a single allocation.
@@ -113,5 +92,71 @@ impl MemorySanitizer {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_allocate_and_contains() {
+        let mut tracker = MemorySanitizer::default();
+
+        // Create a real buffer and use a slice of it
+        let buffer = vec![0u8; 1000];
+        let slice = &buffer[100..150]; // 50 bytes starting at offset 100
+        tracker.register_alloc(slice);
+
+        let base_addr = slice.as_ptr() as usize;
+
+        // Check various ranges
+        assert!(tracker.contains(base_addr, 1)); // Start of allocation
+        assert!(tracker.contains(base_addr + 25, 10)); // Middle of allocation
+        assert!(tracker.contains(base_addr + 49, 1)); // End of allocation
+        assert!(!tracker.contains(base_addr - 1, 1)); // Before allocation
+        assert!(!tracker.contains(base_addr + 50, 1)); // After allocation
+        assert!(!tracker.contains(base_addr, 51)); // Extends beyond allocation
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps with existing memory")]
+    fn test_overlapping_allocations() {
+        let mut tracker = MemorySanitizer::default();
+
+        let buffer = vec![0u8; 1000];
+        let slice1 = &buffer[100..150]; // 50 bytes
+        tracker.register_alloc(slice1);
+
+        // This should panic due to overlap
+        let slice2 = &buffer[90..110]; // 20 bytes, overlaps at start
+        tracker.register_alloc(slice2);
+    }
+
+    #[test]
+    fn test_deallocate() {
+        let mut tracker = MemorySanitizer::default();
+
+        let buffer = vec![0u8; 1000];
+        let slice = &buffer[100..150]; // 50 bytes
+        tracker.register_alloc(slice);
+
+        let base_addr = slice.as_ptr() as usize;
+        assert!(tracker.contains(base_addr + 25, 10));
+
+        tracker.deregister_alloc(slice);
+        assert!(!tracker.contains(base_addr + 25, 10));
+    }
+
+    #[test]
+    #[should_panic(expected = "No allocation found at address")]
+    fn test_deallocate_untracked() {
+        let mut tracker = MemorySanitizer::default();
+
+        let buffer = vec![0u8; 1000];
+        let slice = &buffer[100..150]; // 50 bytes
+
+        // Try to deregister a buffer that was never registered
+        tracker.deregister_alloc(slice);
     }
 }

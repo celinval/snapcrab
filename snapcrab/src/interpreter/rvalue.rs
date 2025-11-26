@@ -5,6 +5,8 @@ use rustc_public::mir::{BinOp, Rvalue, UnOp};
 use rustc_public::ty::{IntTy, RigidTy, Ty, UintTy};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
+use super::function::FnInterpreter;
+
 /// Trait for evaluating binary operations on values.
 pub trait BinaryEval {
     /// Evaluates a binary operation on two values.
@@ -153,7 +155,7 @@ fn eval_bool_unop(op: UnOp, v: &Value) -> Result<Value> {
     }
 }
 
-impl super::function::FnInterpreter {
+impl<'a> FnInterpreter<'a> {
     /// Evaluates an rvalue (right-hand side value) expression.
     ///
     /// # Arguments

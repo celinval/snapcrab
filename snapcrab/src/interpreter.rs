@@ -1,4 +1,4 @@
-mod function;
+pub mod function;
 mod place;
 mod rvalue;
 

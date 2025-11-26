@@ -1,5 +1,4 @@
-use crate::heap::Heap;
-use crate::memory::stack::StackFrame;
+use crate::memory::ThreadMemory;
 use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;
@@ -11,52 +10,51 @@ use tracing::{debug, info};
 ///
 /// The interpreter maintains a stack frame for local variables and executes basic blocks
 /// sequentially, handling statements and terminators to implement control flow.
-#[derive(Debug)]
-pub struct FnInterpreter {
-    /// Stack frame containing local variable values
-    pub(super) frame: StackFrame,
+pub struct FnInterpreter<'a> {
+    /// The memory accessible to the interpreter
+    pub(super) memory: &'a mut ThreadMemory,
     /// Index of the currently executing basic block
     current_block: BasicBlockIdx,
     /// Function instance being interpreted
     instance: Instance,
     /// MIR body containing the function's basic blocks and metadata
-    body: Body,
+    body: &'a Body,
 }
 
-impl FnInterpreter {
-    /// Creates a new function interpreter for the given instance.
-    ///
-    /// # Arguments
-    /// * `instance` - The function instance to interpret
-    ///
-    /// # Returns
-    /// * `Ok(FnInterpreter)` - Successfully created interpreter
-    /// * `Err(anyhow::Error)` - If the instance has no body
-    pub fn new(instance: Instance) -> Result<Self> {
-        let body = instance
-            .body()
-            .ok_or_else(|| anyhow::anyhow!("No body for instance"))?;
-
-        let frame = StackFrame::new(&body)?;
-        Ok(Self {
-            frame,
+/// Run the interpreter for the given instance.
+///
+/// # Arguments
+/// * `instance` - The instance to interpret
+/// * `memory` - The memory context for execution
+/// * `args` - Arguments to pass to the function
+///
+/// # Returns
+/// * `Ok(Value)` - The return value of the function
+/// * `Err(anyhow::Error)` - If execution fails
+pub fn invoke_fn(instance: Instance, memory: &mut ThreadMemory, args: Vec<Value>) -> Result<Value> {
+    memory.with_stack_frame(instance, |body, memory| {
+        let interpreter = FnInterpreter {
+            memory,
             current_block: 0,
             instance,
             body,
-        })
-    }
+        };
+        interpreter.execute(args)
+    })
+}
 
+impl FnInterpreter<'_> {
     /// Executes the function by interpreting its MIR basic blocks.
     ///
     /// Consumes the interpreter and runs until the function returns or an error occurs.
     ///
     /// # Arguments
-    /// * `_heap` - Heap for dynamic memory allocation (currently unused)
+    /// * args: The arguments to the function
     ///
     /// # Returns
     /// * `Ok(Value)` - The return value of the function
     /// * `Err(anyhow::Error)` - If execution fails
-    pub fn run(mut self, heap: &mut Heap, args: Vec<Value>) -> Result<Value> {
+    pub fn execute(mut self, args: Vec<Value>) -> Result<Value> {
         info!("Starting interpretation of {}", self.instance.name());
 
         // Ensure argument count matches expected
@@ -70,7 +68,7 @@ impl FnInterpreter {
 
         // Initialize arguments in locals (skip local 0 which is return value)
         for (i, arg) in args.into_iter().enumerate() {
-            self.frame.set_local(i + 1, arg)?;
+            self.memory.write_local(i + 1, arg)?;
         }
 
         loop {
@@ -84,7 +82,7 @@ impl FnInterpreter {
             }
 
             // Execute terminator
-            match self.execute_terminator(current_block_idx, heap)? {
+            match self.execute_terminator(current_block_idx)? {
                 ControlFlow::Continue(next_block) => {
                     self.current_block = next_block;
                 }
@@ -141,11 +139,7 @@ impl FnInterpreter {
     /// * `Ok(ControlFlow::Continue(target))` - Continue to target basic block
     /// * `Ok(ControlFlow::Return(value))` - Function returns with value
     /// * `Err(anyhow::Error)` - If terminator execution fails
-    fn execute_terminator(
-        &mut self,
-        bb_idx: BasicBlockIdx,
-        heap: &mut Heap,
-    ) -> Result<ControlFlow> {
+    fn execute_terminator(&mut self, bb_idx: BasicBlockIdx) -> Result<ControlFlow> {
         let terminator = &self.body.blocks[bb_idx].terminator;
         debug!("Executing terminator: {:?}", terminator.kind);
 
@@ -189,7 +183,7 @@ impl FnInterpreter {
                 target,
                 ..
             } => {
-                self.execute_call(&func, &args, &destination, heap)?;
+                self.execute_call(&func, &args, &destination)?;
 
                 match target {
                     Some(target_bb) => Ok(ControlFlow::Continue(target_bb)),
@@ -208,7 +202,6 @@ impl FnInterpreter {
         func: &Operand,
         args: &[Operand],
         destination: &Place,
-        heap: &mut Heap,
     ) -> Result<()> {
         // Evaluate arguments
         let arg_values: Result<Vec<Value>> =
@@ -231,8 +224,7 @@ impl FnInterpreter {
         };
 
         // Create new interpreter and call function
-        let callee_interpreter = FnInterpreter::new(func_instance)?;
-        let result = callee_interpreter.run(heap, arg_values)?;
+        let result = invoke_fn(func_instance, self.memory, arg_values)?;
 
         // Store result in destination
         self.assign_to_place(destination, result)?;

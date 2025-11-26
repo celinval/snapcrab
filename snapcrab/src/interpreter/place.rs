@@ -4,25 +4,26 @@
 //! resolving place references to memory addresses and handling projections
 //! like dereferencing.
 
-use crate::memory;
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::mir::{Place, ProjectionElem};
 use rustc_public::ty::{RigidTy, TyKind};
 
-impl super::function::FnInterpreter {
+use super::function;
+
+impl<'a> function::FnInterpreter<'a> {
     /// Assigns a value to a place (local variable or memory location).
     pub(super) fn assign_to_place(&mut self, place: &Place, value: Value) -> Result<()> {
         let addr = self.resolve_place_addr(place)?;
         let place_ty = place.ty(self.locals())?;
-        memory::write_addr(addr, value.as_bytes(), place_ty)?;
+        self.memory.write_addr(addr, value.as_bytes(), place_ty)?;
         Ok(())
     }
 
     /// Resolves a place to the address of the actual value.
     pub(super) fn resolve_place_addr(&self, place: &Place) -> Result<usize> {
-        let initial_addr = self.frame.get_local_address(place.local)?;
+        let initial_addr = self.memory.local_address(place.local)?;
         let initial_ty = self.locals()[place.local].ty;
 
         let (final_addr, _) = place.projection.iter().try_fold(
@@ -38,7 +39,7 @@ impl super::function::FnInterpreter {
                         };
 
                         // Read the pointer value at current_addr using memory tracker
-                        let ptr_value = memory::read_addr(current_addr, current_ty)?;
+                        let ptr_value = self.memory.read_addr(current_addr, current_ty)?;
                         let address = ptr_value
                             .as_type::<usize>()
                             .ok_or_else(|| anyhow::anyhow!("Expected usize pointer value"))?;
@@ -75,6 +76,6 @@ impl super::function::FnInterpreter {
         }
 
         let addr = self.resolve_place_addr(place)?;
-        memory::read_addr(addr, place_ty)
+        self.memory.read_addr(addr, place_ty)
     }
 }

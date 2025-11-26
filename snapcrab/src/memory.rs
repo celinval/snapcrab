@@ -1,99 +1,236 @@
 //! This module contains APIs for modeling memory
+//!
+//! TODO: Expand on how the memory is organized.
+//! - One ThreadMemory per thread. Obviously.
+//! - Each thread memory contains their own stack
+//! - Thread memories share heap and statics
+//! - Read and write to all memory segments are validated to avoid access out of
+//!   bounds.
 
+pub mod heap;
 mod sanitizer;
-pub mod stack;
+mod stack;
+mod statics;
 
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::Result;
+use heap::Heap;
+use rustc_public::mir::Body;
+use rustc_public::mir::mono::Instance;
 use rustc_public::ty::Ty;
-use sanitizer::global_memory_tracker;
-use std::{ptr, slice};
+use stack::Stack;
+use statics::Statics;
 
-/// Reads data from a memory address with bounds checking
-pub fn read_addr(address: usize, ty: Ty) -> Result<Value> {
-    let size = ty.size()?;
-    let tracker = global_memory_tracker().lock().unwrap();
-    if !tracker.contains(address, size) {
-        anyhow::bail!("Invalid memory read at 0x{:x}", address);
+/// Thread-local memory representation.
+///
+/// This is the main structure exported to the rest of the interpreter.
+#[derive(Default)]
+pub struct ThreadMemory {
+    stack: Stack,
+    #[allow(unused)]
+    heap: Heap,
+    #[allow(unused)]
+    statics: Statics,
+}
+
+impl ThreadMemory {
+    /// Create a new ThreadMemory from scratch.
+    ///
+    /// This should only be called for the interpreter entry point.
+    pub fn new() -> Self {
+        ThreadMemory::default()
     }
 
-    // SAFETY: Memory tracker verified this address range is valid
-    // and memory tracker is locked preventing competing operations
-    unsafe {
-        let slice = slice::from_raw_parts(address as *const u8, size);
-        Ok(Value::from_bytes(slice))
+    /// Runs a method with their own stack frame.
+    pub fn with_stack_frame<F, R>(&mut self, instance: Instance, func: F) -> R
+    where
+        F: FnOnce(&Body, &mut Self) -> R,
+    {
+        Stack::with_stack_frame(instance, self, func)
+    }
+
+    /// Read local variable.
+    /// TODO: Use rustc_public Local here and in subsequent calls
+    #[inline]
+    pub fn read_local(&self, local: usize) -> Result<Value> {
+        self.stack.read_local(local)
+    }
+
+    #[inline]
+    pub fn write_local(&mut self, local: usize, value: Value) -> Result<()> {
+        self.stack.write_local(local, value)
+    }
+
+    #[inline]
+    pub fn local_address(&self, local: usize) -> Result<usize> {
+        self.stack.local_address(local)
+    }
+
+    pub fn read_addr(&self, address: usize, ty: Ty) -> Result<Value> {
+        let size = ty.size()?;
+        let alignment = ty.alignment()?;
+
+        // Check alignment
+        if !address.is_multiple_of(alignment) {
+            anyhow::bail!(
+                "Misaligned memory access: address 0x{:x} is not aligned to {} bytes",
+                address,
+                alignment
+            );
+        }
+
+        // Try stack first
+        match self.stack.read_addr(address, size) {
+            Ok(data) => return Ok(Value::from_bytes(data)),
+            Err(MemoryAccessError::OutOfBounds) => {
+                anyhow::bail!(
+                    "Stack memory access out of bounds at address 0x{:x}",
+                    address
+                )
+            }
+            Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+        }
+
+        // Try heap
+        match self.heap.read_addr(address, size) {
+            Ok(data) => return Ok(Value::from_bytes(data)),
+            Err(MemoryAccessError::OutOfBounds) => {
+                anyhow::bail!(
+                    "Heap memory access out of bounds at address 0x{:x}",
+                    address
+                )
+            }
+            Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+        }
+
+        // Try statics
+        match self.statics.read_addr(address, size) {
+            Ok(data) => Ok(Value::from_bytes(data)),
+            Err(MemoryAccessError::OutOfBounds) => {
+                anyhow::bail!(
+                    "Static memory access out of bounds at address 0x{:x}",
+                    address
+                )
+            }
+            Err(MemoryAccessError::NotFound) => {
+                anyhow::bail!("Address 0x{:x} not found in any memory segment", address)
+            }
+        }
+    }
+
+    pub fn write_addr(&mut self, address: usize, data: &[u8], ty: Ty) -> Result<()> {
+        let size = ty.size()?;
+        let alignment = ty.alignment()?;
+
+        // Check alignment
+        if !address.is_multiple_of(alignment) {
+            anyhow::bail!(
+                "Misaligned memory access: address 0x{:x} is not aligned to {} bytes",
+                address,
+                alignment
+            );
+        }
+
+        // Check data size matches type size
+        if data.len() != size {
+            anyhow::bail!(
+                "Data size mismatch: expected {} bytes, got {}",
+                size,
+                data.len()
+            );
+        }
+
+        // Try stack first
+        match self.stack.write_addr(address, data) {
+            Ok(()) => return Ok(()),
+            Err(MemoryAccessError::OutOfBounds) => {
+                anyhow::bail!(
+                    "Stack memory access out of bounds at address 0x{:x}",
+                    address
+                )
+            }
+            Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+        }
+
+        // Try heap
+        match self.heap.write_addr(address, data) {
+            Ok(()) => return Ok(()),
+            Err(MemoryAccessError::OutOfBounds) => {
+                anyhow::bail!(
+                    "Heap memory access out of bounds at address 0x{:x}",
+                    address
+                )
+            }
+            Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+        }
+
+        // Try statics
+        match self.statics.write_addr(address, data) {
+            Ok(()) => Ok(()),
+            Err(MemoryAccessError::OutOfBounds) => {
+                anyhow::bail!(
+                    "Static memory access out of bounds at address 0x{:x}",
+                    address
+                )
+            }
+            Err(MemoryAccessError::NotFound) => {
+                // No more segments to try
+                anyhow::bail!("Address 0x{:x} not found in any memory segment", address)
+            }
+        }
     }
 }
 
-/// Writes data to a memory address with bounds checking
-pub fn write_addr(address: usize, data: &[u8], ty: Ty) -> Result<()> {
-    let size = ty.size()?;
-    if data.len() != size {
-        anyhow::bail!("Data size mismatch: expected {}, got {}", size, data.len());
-    }
-
-    let tracker = global_memory_tracker().lock().unwrap();
-    if !tracker.contains(address, size) {
-        anyhow::bail!("Invalid memory write at 0x{:x}", address);
-    }
-
-    // SAFETY: Memory tracker verified this address range is valid
-    // and memory tracker is locked preventing competing operations
-    unsafe {
-        ptr::copy(data.as_ptr(), address as *mut u8, size);
-    }
-    Ok(())
+/// The type of errors that can be encountered during a memory access.
+#[derive(Debug)]
+enum MemoryAccessError {
+    /// The base address is in the memory segment, but request is out-of-bounds.
+    OutOfBounds,
+    /// The base address is not in this memory segment.
+    NotFound,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sanitizer::MemorySanitizer;
-
-    #[test]
-    fn test_allocate_and_contains() {
-        let mut tracker = MemorySanitizer::new();
-
-        // Allocate memory at address 100, size 50
-        tracker.allocate(100, 50).unwrap();
-
-        // Check various ranges
-        assert!(tracker.contains(100, 1)); // Start of allocation
-        assert!(tracker.contains(125, 10)); // Middle of allocation
-        assert!(tracker.contains(149, 1)); // End of allocation
-        assert!(!tracker.contains(99, 1)); // Before allocation
-        assert!(!tracker.contains(150, 1)); // After allocation
-        assert!(!tracker.contains(100, 51)); // Extends beyond allocation
+impl std::fmt::Display for MemoryAccessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryAccessError::OutOfBounds => write!(f, "Memory access out of bounds"),
+            MemoryAccessError::NotFound => write!(f, "Address not found in memory segment"),
+        }
     }
+}
 
-    #[test]
-    fn test_overlapping_allocations() {
-        let mut tracker = MemorySanitizer::new();
+impl std::error::Error for MemoryAccessError {}
 
-        tracker.allocate(100, 50).unwrap();
+/// Unsafe trait for memory segments that can perform safe memory operations.
+///
+/// # Safety
+///
+/// Implementors must guarantee:
+/// - The safety of all memory operations performed
+/// - Ownership or valid access rights to all memory accessed
+/// - That returned memory references remain valid for their lifetime
+/// - That concurrent access is properly synchronized if needed
+unsafe trait MemorySegment {
+    /// Reads data from a memory address.
+    ///
+    /// # Arguments
+    /// * `address` - The memory address to read from
+    /// * `size` - Number of bytes to read
+    ///
+    /// # Returns
+    /// * `Ok(&[u8])` - Reference to the memory data if the read is valid
+    /// * `Err` - Error found when trying to satisfy the request
+    fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError>;
 
-        // These should fail due to overlap
-        assert!(tracker.allocate(90, 20).is_err()); // Overlaps at start
-        assert!(tracker.allocate(140, 20).is_err()); // Overlaps at end
-        assert!(tracker.allocate(110, 10).is_err()); // Contained within
-        assert!(tracker.allocate(80, 100).is_err()); // Contains existing
-
-        // This should succeed (no overlap)
-        assert!(tracker.allocate(200, 50).is_ok());
-    }
-
-    #[test]
-    fn test_deallocate() {
-        let mut tracker = MemorySanitizer::new();
-
-        tracker.allocate(100, 50).unwrap();
-        assert!(tracker.contains(125, 10));
-
-        tracker.deallocate(100).unwrap();
-        assert!(!tracker.contains(125, 10));
-
-        // Deallocating again should fail
-        assert!(tracker.deallocate(100).is_err());
-    }
+    /// Writes data to a memory address.
+    ///
+    /// # Arguments
+    /// * `address` - The memory address to write to
+    /// * `data` - The data to write
+    ///
+    /// # Returns
+    /// * `Ok(())` - Write was successful
+    /// * `Err` - Error found when trying to satisfy the request
+    fn write_addr(&self, address: usize, data: &[u8]) -> Result<(), MemoryAccessError>;
 }

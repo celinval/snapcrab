@@ -9,14 +9,13 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-pub mod heap;
 pub mod interpreter;
 pub mod memory;
 pub mod ty;
 pub mod value;
 
-use crate::heap::Heap;
-use crate::interpreter::FnInterpreter;
+use crate::interpreter::function::invoke_fn;
+use crate::memory::ThreadMemory;
 use crate::value::{TypedValue, Value};
 use anyhow::{Result, bail};
 use rustc_public::mir::mono::Instance;
@@ -75,9 +74,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
     }
 
     // Execute function
-    let interpreter = FnInterpreter::new(instance)?;
-    let mut heap = Heap::new();
-    let result = interpreter.run(&mut heap, vec![])?;
+    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![])?;
 
     // Get return type from instance
     let body = instance
@@ -107,9 +104,7 @@ pub fn run_main() -> Result<ExitCode> {
 }
 
 pub fn run(instance: Instance) -> Result<ExitCode> {
-    let interpreter = FnInterpreter::new(instance)?;
-    let mut heap = Heap::new();
-    let result = interpreter.run(&mut heap, vec![])?;
+    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![])?;
 
     // Convert the result value to an exit code
     match result {
