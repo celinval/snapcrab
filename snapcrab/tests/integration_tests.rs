@@ -158,3 +158,17 @@ check_custom_start!(
     start_fn = "nonexistent_function",
     result = TestResult::ErrorRegex(r".*Function.*not found.*".to_string())
 );
+
+check_custom_start!(
+    test_ptr_compare,
+    input = "raw_pointer_test.rs",
+    start_fn = "ptr_compare",
+    result = TestResult::SuccessWithValue(Value::from_bool(true))
+);
+
+check_custom_start!(
+    test_use_dangling_ptr,
+    input = "raw_pointer_test.rs",
+    start_fn = "use_dangling_ptr",
+    result = TestResult::ErrorRegex(r".*Unsupported terminator.*Assert.*".to_string())
+);

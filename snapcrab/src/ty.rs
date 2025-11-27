@@ -8,6 +8,12 @@ pub trait MonoType {
 
     /// Return the alignment of the type in bytes.
     fn alignment(&self) -> Result<usize>;
+
+    /// Check if this is a thin pointer (single usize).
+    fn is_thin_ptr(&self) -> bool;
+
+    /// Check if this is a wide pointer (two usize values).
+    fn is_wide_ptr(&self) -> bool;
 }
 
 impl MonoType for Ty {
@@ -21,5 +27,15 @@ impl MonoType for Ty {
         Ok(self
             .layout()
             .map(|layout| layout.shape().abi_align as usize)?)
+    }
+
+    fn is_thin_ptr(&self) -> bool {
+        let ptr_size = crate::memory::pointer_width();
+        self.kind().is_any_ptr() && self.size().ok() == Some(ptr_size)
+    }
+
+    fn is_wide_ptr(&self) -> bool {
+        let ptr_size = crate::memory::pointer_width();
+        self.kind().is_any_ptr() && self.size().ok() == Some(2 * ptr_size)
     }
 }

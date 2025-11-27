@@ -1,7 +1,8 @@
+use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Result, anyhow, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
-use rustc_public::mir::{BinOp, Rvalue, UnOp};
+use rustc_public::mir::{BinOp, CastKind, NullOp, Rvalue, UnOp};
 use rustc_public::ty::{IntTy, RigidTy, Ty, UintTy};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -14,12 +15,12 @@ pub trait BinaryEval {
     /// # Arguments
     /// * `left` - Left operand value
     /// * `right` - Right operand value
-    /// * `result_type` - Expected type of the result
+    /// * `operand_type` - Type of the operands
     ///
     /// # Returns
     /// * `Ok(Value)` - Result of the operation
     /// * `Err(anyhow::Error)` - If operation fails or is unsupported
-    fn eval(&self, left: &Value, right: &Value, result_type: RigidTy) -> Result<Value>;
+    fn eval(&self, left: &Value, right: &Value, operand_type: RigidTy) -> Result<Value>;
 }
 
 /// Trait for evaluating unary operations on values.
@@ -37,8 +38,8 @@ pub trait UnaryEval {
 }
 
 impl BinaryEval for BinOp {
-    fn eval(&self, left: &Value, right: &Value, result_type: RigidTy) -> Result<Value> {
-        match result_type {
+    fn eval(&self, left: &Value, right: &Value, operand_type: RigidTy) -> Result<Value> {
+        match operand_type {
             RigidTy::Int(int_ty) => match int_ty {
                 IntTy::I8 => eval_int_binop::<i8>(*self, left, right),
                 IntTy::I16 => eval_int_binop::<i16>(*self, left, right),
@@ -56,9 +57,16 @@ impl BinaryEval for BinOp {
                 UintTy::Usize => eval_int_binop::<usize>(*self, left, right),
             },
             RigidTy::Bool => eval_bool_binop(*self, left, right),
+            RigidTy::RawPtr(_, _) | RigidTy::Ref(_, _, _) => {
+                let ty = Ty::from_rigid_kind(operand_type);
+                if !ty.is_thin_ptr() {
+                    bail!("Wide pointers not supported");
+                }
+                eval_int_binop::<usize>(*self, left, right)
+            }
             _ => bail!(
                 "Unsupported binary operation `{self:?}` on `{}` type",
-                Ty::from_rigid_kind(result_type)
+                Ty::from_rigid_kind(operand_type)
             ),
         }
     }
@@ -96,25 +104,46 @@ where
         + CheckedMul
         + CheckedSub
         + PartialEq
-        + Zero,
+        + PartialOrd
+        + Zero
+        + std::ops::BitAnd<Output = T>
+        + std::ops::BitOr<Output = T>
+        + std::ops::BitXor<Output = T>,
 {
     let left = l.as_type::<T>().unwrap();
     let right = r.as_type::<T>().unwrap();
-    let result = match op {
-        BinOp::Add => left.checked_add(&right),
-        BinOp::Sub => left.checked_sub(&right),
-        BinOp::Mul => left.checked_mul(&right),
+    match op {
+        BinOp::Add => left
+            .checked_add(&right)
+            .map(Value::from_type)
+            .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow")),
+        BinOp::Sub => left
+            .checked_sub(&right)
+            .map(Value::from_type)
+            .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow")),
+        BinOp::Mul => left
+            .checked_mul(&right)
+            .map(Value::from_type)
+            .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow")),
         BinOp::Div => {
             if right == <T as Zero>::zero() {
                 bail!("Division by zero");
             }
             left.checked_div(&right)
+                .map(Value::from_type)
+                .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow"))
         }
+        BinOp::BitAnd => Ok(Value::from_type(left & right)),
+        BinOp::BitOr => Ok(Value::from_type(left | right)),
+        BinOp::BitXor => Ok(Value::from_type(left ^ right)),
+        BinOp::Eq => Ok(Value::from_bool(left == right)),
+        BinOp::Ne => Ok(Value::from_bool(left != right)),
+        BinOp::Lt => Ok(Value::from_bool(left < right)),
+        BinOp::Le => Ok(Value::from_bool(left <= right)),
+        BinOp::Gt => Ok(Value::from_bool(left > right)),
+        BinOp::Ge => Ok(Value::from_bool(left >= right)),
         _ => bail!("Unsupported integer binary operation: {:?}", op),
-    };
-    result
-        .map(|val| Value::from_type(val))
-        .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow"))
+    }
 }
 
 /// Evaluates a binary operation on boolean values.
@@ -169,8 +198,8 @@ impl<'a> FnInterpreter<'a> {
             Rvalue::BinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;
                 let right_val = self.evaluate_operand(right)?;
-                let result_type = rvalue.ty(self.locals())?.kind().rigid().unwrap().clone();
-                op.eval(&left_val, &right_val, result_type)
+                let operand_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
+                op.eval(&left_val, &right_val, operand_type)
             }
             Rvalue::UnaryOp(op, operand) => {
                 let val = self.evaluate_operand(operand)?;
@@ -181,6 +210,18 @@ impl<'a> FnInterpreter<'a> {
             Rvalue::Ref(_, _, place) => {
                 let address = self.resolve_place_addr(place)?;
                 Ok(Value::from_type(address))
+            }
+            Rvalue::AddressOf(_, place) => {
+                let ty = rvalue.ty(self.locals())?;
+                if !ty.is_thin_ptr() {
+                    bail!("Wide pointers not supported");
+                }
+                let address = self.resolve_place_addr(place)?;
+                Ok(Value::from_type(address))
+            }
+            Rvalue::Cast(cast_kind, operand, target_ty) => {
+                let value = self.evaluate_operand(operand)?;
+                self.perform_cast(cast_kind, value, target_ty)
             }
             Rvalue::Aggregate(kind, operands) => match kind {
                 rustc_public::mir::AggregateKind::Tuple => {
@@ -194,9 +235,32 @@ impl<'a> FnInterpreter<'a> {
                 }
                 _ => bail!("Unsupported aggregate kind: {:?}", kind),
             },
+            Rvalue::NullaryOp(op, ty) => match op {
+                NullOp::AlignOf => Ok(Value::from_type(ty.alignment()?)),
+                _ => bail!("Unsupported nullary op: {:?}", op),
+            },
             _ => {
                 bail!("Unsupported rvalue: {:?}", rvalue);
             }
+        }
+    }
+
+    /// Performs a cast operation
+    fn perform_cast(
+        &self,
+        cast_kind: &rustc_public::mir::CastKind,
+        value: Value,
+        target_ty: &Ty,
+    ) -> Result<Value> {
+        match cast_kind {
+            CastKind::PtrToPtr => {
+                if !target_ty.is_thin_ptr() {
+                    bail!("Wide pointers not supported");
+                }
+                Ok(value)
+            }
+            CastKind::Transmute => Ok(value),
+            _ => bail!("Unsupported cast kind: {:?}", cast_kind),
         }
     }
 }
@@ -466,6 +530,104 @@ mod tests {
                 )
                 .unwrap(),
             Value::from_type(161usize)
+        );
+    }
+
+    #[test]
+    fn test_bitwise_operations() {
+        assert_eq!(
+            BinOp::BitAnd
+                .eval(
+                    &Value::from_type(0b1100u8),
+                    &Value::from_type(0b1010u8),
+                    RigidTy::Uint(UintTy::U8)
+                )
+                .unwrap(),
+            Value::from_type(0b1000u8)
+        );
+        assert_eq!(
+            BinOp::BitOr
+                .eval(
+                    &Value::from_type(0b1100u8),
+                    &Value::from_type(0b1010u8),
+                    RigidTy::Uint(UintTy::U8)
+                )
+                .unwrap(),
+            Value::from_type(0b1110u8)
+        );
+        assert_eq!(
+            BinOp::BitXor
+                .eval(
+                    &Value::from_type(0b1100u8),
+                    &Value::from_type(0b1010u8),
+                    RigidTy::Uint(UintTy::U8)
+                )
+                .unwrap(),
+            Value::from_type(0b0110u8)
+        );
+    }
+
+    #[test]
+    fn test_comparison_operations() {
+        assert_eq!(
+            BinOp::Eq
+                .eval(
+                    &Value::from_type(42i32),
+                    &Value::from_type(42i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_bool(true)
+        );
+        assert_eq!(
+            BinOp::Ne
+                .eval(
+                    &Value::from_type(42i32),
+                    &Value::from_type(43i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_bool(true)
+        );
+        assert_eq!(
+            BinOp::Lt
+                .eval(
+                    &Value::from_type(10i32),
+                    &Value::from_type(20i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_bool(true)
+        );
+        assert_eq!(
+            BinOp::Le
+                .eval(
+                    &Value::from_type(10i32),
+                    &Value::from_type(10i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_bool(true)
+        );
+        assert_eq!(
+            BinOp::Gt
+                .eval(
+                    &Value::from_type(20i32),
+                    &Value::from_type(10i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_bool(true)
+        );
+        assert_eq!(
+            BinOp::Ge
+                .eval(
+                    &Value::from_type(20i32),
+                    &Value::from_type(20i32),
+                    RigidTy::Int(IntTy::I32)
+                )
+                .unwrap(),
+            Value::from_bool(true)
         );
     }
 }

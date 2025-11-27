@@ -22,6 +22,9 @@ impl<'a> function::FnInterpreter<'a> {
     }
 
     /// Resolves a place to the address of the actual value.
+    ///
+    /// TODO: This won't quite work for fat pointers. We might need to refactor
+    /// this a bit later.
     pub(super) fn resolve_place_addr(&self, place: &Place) -> Result<usize> {
         let initial_addr = self.memory.local_address(place.local)?;
         let initial_ty = self.locals()[place.local].ty;

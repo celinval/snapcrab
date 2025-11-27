@@ -18,9 +18,18 @@ use anyhow::Result;
 use heap::Heap;
 use rustc_public::mir::Body;
 use rustc_public::mir::mono::Instance;
+use rustc_public::target::MachineInfo;
 use rustc_public::ty::Ty;
 use stack::Stack;
 use statics::Statics;
+use std::sync::LazyLock;
+
+static MACHINE_INFO: LazyLock<MachineInfo> = LazyLock::new(MachineInfo::target);
+
+/// Returns the pointer width in bytes for the target machine.
+pub fn pointer_width() -> usize {
+    MACHINE_INFO.pointer_width.bytes()
+}
 
 /// Thread-local memory representation.
 ///
