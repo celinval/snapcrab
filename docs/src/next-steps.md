@@ -24,3 +24,4 @@ Here is a list of things that we can improve in rustc_public:
 1. Add `PlaceRef`. Make it more efficient to process Place.
    - Once we do this, we can remove place creation in the interpreter
 2. Add a way to retrieve all mono items
+3. Add a way to retrieve source for a span so we can use annotate_snippets.

@@ -195,3 +195,12 @@ check_custom_start!(
     start_fn = "check_align_of",
     result = TestResult::SuccessWithValue(Value::from_bool(true))
 );
+
+check_custom_start!(
+    test_division_by_zero_diagnostic,
+    input = "diagnostic_test.rs",
+    start_fn = "division_by_zero",
+    result = TestResult::ErrorRegex(
+        r".*Failed to execute.*diagnostic_test.rs.*divide by zero.*".to_string()
+    )
+);

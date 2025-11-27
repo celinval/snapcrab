@@ -78,11 +78,15 @@ impl FnInterpreter<'_> {
 
             // Execute statements
             for stmt_idx in 0..stmt_count {
-                self.execute_statement(current_block_idx, stmt_idx)?;
+                self.execute_statement(current_block_idx, stmt_idx)
+                    .map_err(|e| self.statement_error(current_block_idx, stmt_idx, e))?;
             }
 
             // Execute terminator
-            match self.execute_terminator(current_block_idx)? {
+            match self
+                .execute_terminator(current_block_idx)
+                .map_err(|e| self.terminator_error(current_block_idx, e))?
+            {
                 ControlFlow::Continue(next_block) => {
                     self.current_block = next_block;
                 }
@@ -97,6 +101,25 @@ impl FnInterpreter<'_> {
     /// Get the local declarations for type checking
     pub(super) fn locals(&self) -> &[rustc_public::mir::LocalDecl] {
         self.body.locals()
+    }
+
+    /// Add context to statement execution errors
+    fn statement_error(
+        &self,
+        bb_idx: BasicBlockIdx,
+        stmt_idx: usize,
+        error: anyhow::Error,
+    ) -> anyhow::Error {
+        let span_info = self.body.blocks[bb_idx].statements[stmt_idx]
+            .span
+            .diagnostic();
+        anyhow!("Failed to execute statement at {}. {}", span_info, error)
+    }
+
+    /// Add context to terminator execution errors
+    fn terminator_error(&self, bb_idx: BasicBlockIdx, error: anyhow::Error) -> anyhow::Error {
+        let span_info = self.body.blocks[bb_idx].terminator.span.diagnostic();
+        anyhow!("Failed to execute terminator at {}. {}", span_info, error)
     }
 
     /// Executes a single statement within a basic block.
