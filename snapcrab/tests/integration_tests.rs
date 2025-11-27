@@ -170,5 +170,28 @@ check_custom_start!(
     test_use_dangling_ptr,
     input = "raw_pointer_test.rs",
     start_fn = "use_dangling_ptr",
-    result = TestResult::ErrorRegex(r".*Unsupported terminator.*Assert.*".to_string())
+    result = TestResult::ErrorRegex(
+        r".*(memory access out of bounds|not found in any memory segment).*".to_string()
+    )
+);
+
+check_custom_start!(
+    test_read_misaligned_ptr,
+    input = "raw_pointer_test.rs",
+    start_fn = "read_misaligned_ptr",
+    result = TestResult::ErrorRegex(r".*Unsupported.*Offset.*".to_string())
+);
+
+check_custom_start!(
+    test_check_size_of,
+    input = "size_align_test.rs",
+    start_fn = "check_size_of",
+    result = TestResult::SuccessWithValue(Value::from_bool(true))
+);
+
+check_custom_start!(
+    test_check_align_of,
+    input = "size_align_test.rs",
+    start_fn = "check_align_of",
+    result = TestResult::SuccessWithValue(Value::from_bool(true))
 );

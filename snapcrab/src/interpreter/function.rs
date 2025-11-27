@@ -1,6 +1,6 @@
 use crate::memory::ThreadMemory;
 use crate::value::Value;
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
 use rustc_public::ty::{ConstantKind, MirConst, RigidTy, TyKind};
@@ -188,6 +188,27 @@ impl FnInterpreter<'_> {
                 match target {
                     Some(target_bb) => Ok(ControlFlow::Continue(target_bb)),
                     None => bail!("Diverging calls not yet supported"),
+                }
+            }
+            TerminatorKind::Assert {
+                cond,
+                expected,
+                target,
+                msg,
+                ..
+            } => {
+                let cond_value = self.evaluate_operand(&cond)?;
+                let cond_bool = cond_value
+                    .as_bool()
+                    .ok_or_else(|| anyhow!("Assert condition must be a boolean"))?;
+
+                if cond_bool == expected {
+                    Ok(ControlFlow::Continue(target))
+                } else {
+                    let msg_str = msg
+                        .description()
+                        .unwrap_or("Failed to get assert description");
+                    bail!("Assertion failed: {}", msg_str);
                 }
             }
             _ => {

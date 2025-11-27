@@ -237,6 +237,7 @@ impl<'a> FnInterpreter<'a> {
             },
             Rvalue::NullaryOp(op, ty) => match op {
                 NullOp::AlignOf => Ok(Value::from_type(ty.alignment()?)),
+                NullOp::SizeOf => Ok(Value::from_type(ty.size()?)),
                 _ => bail!("Unsupported nullary op: {:?}", op),
             },
             _ => {

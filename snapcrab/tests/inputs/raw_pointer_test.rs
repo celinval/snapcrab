@@ -15,3 +15,10 @@ pub fn use_dangling_ptr() -> i32 {
     let ptr = dangling_ptr();
     unsafe { *ptr }
 }
+
+pub fn read_misaligned_ptr() -> u32 {
+    let x: i128 = 0;
+    let ptr = &x as *const i128 as *const u32;
+    let misaligned = unsafe { ptr.add(1) };
+    unsafe { *misaligned }
+}
