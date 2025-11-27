@@ -10,6 +10,11 @@ An experimental Rust interpreter designed to speed up local development by execu
 - Support unit tests (`#[test]` functions) without full compilation
 - Target Linux x86-64 initially
 
+As a developer of `rustc_public`, I plan to also use this experiment for:
+
+- Identifying gaps in the `rustc_public` APIs
+- Serve as a practical example of using `rustc_public` APIs for building Rust tooling
+
 ## Current Status
 
 Early development phase. Starting with a limited subset of Rust syntax to evaluate project feasibility:

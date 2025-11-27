@@ -3,8 +3,6 @@
 SnapCrab is an experimental Rust interpreter designed to accelerate local
 development by executing Rust code without the overhead of compilation and linking.
 
-## What is SnapCrab?
-
 Traditional Rust development requires a full compilation and linking cycle for every code change,
 which can slow down the development process.
 SnapCrab aims to solve this by interpreting Rust code directly,
@@ -27,3 +25,5 @@ with plans to expand support for external dependencies and broader Rust features
 ## Getting Started
 
 This documentation will guide you through using SnapCrab for faster Rust development workflows.
+
+Beyond providing a fast interpreter, SnapCrab serves as a tool to identify gaps in the `rustc_public` APIs and as a practical example demonstrating how to use these APIs for building Rust tooling. The project acts as a testbed for exploring compiler interface improvements.
