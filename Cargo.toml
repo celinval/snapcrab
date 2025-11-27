@@ -4,3 +4,12 @@ members = [
     "cargo-snap",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+authors = ["Celina G. Val"]
+license = "Apache-2.0 OR MIT"
+edition = "2024"
+repository = "https://github.com/celinval/snapcrab"
+homepage = "https://celinval.github.io/snapcrab/"
+rust-version = "1.91.1"

@@ -1,6 +1,21 @@
 [package]
 name = "cargo-snap"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Cargo subcommand for running tests with SnapCrab interpreter"
+categories = ["development-tools", "command-line-utilities"]
+keywords = ["cargo", "interpreter", "testing", "development"]
+include = [
+    "src/**/*",
+    "../Cargo.lock",
+    "../README.md",
+    "../LICENSE-APACHE",
+    "../LICENSE-MIT",
+]
 
 [dependencies]

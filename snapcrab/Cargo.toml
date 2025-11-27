@@ -1,7 +1,23 @@
 [package]
 name = "snapcrab"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Experimental Rust interpreter for rapid development iteration"
+categories = ["development-tools", "command-line-utilities"]
+keywords = ["interpreter", "rust", "testing", "development"]
+include = [
+    "src/**/*",
+    "tests/**/*",
+    "../Cargo.lock",
+    "../README.md",
+    "../LICENSE-APACHE",
+    "../LICENSE-MIT",
+]
 
 [[bin]]
 name = "snapcrab"
