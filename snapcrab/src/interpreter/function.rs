@@ -1,3 +1,5 @@
+use std::thread;
+
 use crate::memory::ThreadMemory;
 use crate::value::Value;
 use anyhow::{Result, anyhow, bail};
@@ -19,6 +21,8 @@ pub struct FnInterpreter<'a> {
     instance: Instance,
     /// MIR body containing the function's basic blocks and metadata
     body: &'a Body,
+    /// The number a call is in the stack during the unwinding
+    unwinding: &'a mut Option<u16>,
 }
 
 /// Run the interpreter for the given instance.
@@ -31,13 +35,19 @@ pub struct FnInterpreter<'a> {
 /// # Returns
 /// * `Ok(Value)` - The return value of the function
 /// * `Err(anyhow::Error)` - If execution fails
-pub fn invoke_fn(instance: Instance, memory: &mut ThreadMemory, args: Vec<Value>) -> Result<Value> {
+pub fn invoke_fn(
+    instance: Instance,
+    memory: &mut ThreadMemory,
+    args: Vec<Value>,
+    unwinding: &mut Option<u16>,
+) -> Result<Value> {
     memory.with_stack_frame(instance, |body, memory| {
         let interpreter = FnInterpreter {
             memory,
             current_block: 0,
             instance,
             body,
+            unwinding,
         };
         interpreter.execute(args)
     })
@@ -103,23 +113,69 @@ impl FnInterpreter<'_> {
         self.body.locals()
     }
 
+    /// Prints the error including the failing thread
+    fn generate_error(
+        &mut self,
+        span: rustc_public::ty::Span,
+        error: anyhow::Error,
+    ) -> anyhow::Error {
+        let include_backtrace = match std::env::var("RUST_BACKTRACE").as_deref() {
+            Err(_) | Ok("0") => false,
+            Ok(_) => true,
+        };
+
+        if !include_backtrace && self.unwinding.is_some() {
+            // In compact mode and already unwinding
+            return error;
+        }
+
+        let msg = if self.unwinding.is_none() {
+            let tname = thread::current().name().map_or_else(
+                || format!("thread_{:?}", thread::current().id()),
+                str::to_string,
+            );
+            let span_info = span.diagnostic();
+            let msg = format!("thread '{tname}' panicked at {span_info}\n{}", error);
+            if std::env::var("RUST_BACKTRACE").is_err() {
+                format!(
+                    "{msg}\n note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+                )
+            } else {
+                msg
+            }
+        } else {
+            error.to_string()
+        };
+
+        let current = *self.unwinding.get_or_insert_default();
+        *self.unwinding = Some(current + 1);
+
+        if include_backtrace {
+            // Append stack trace
+            let span_info = span.diagnostic();
+            let func = self.instance.name();
+            anyhow!("{msg}\n  {current}: at {func}\n      {span_info}")
+        } else {
+            anyhow::Error::msg(msg)
+        }
+    }
+
     /// Add context to statement execution errors
     fn statement_error(
-        &self,
+        &mut self,
         bb_idx: BasicBlockIdx,
         stmt_idx: usize,
         error: anyhow::Error,
     ) -> anyhow::Error {
-        let span_info = self.body.blocks[bb_idx].statements[stmt_idx]
-            .span
-            .diagnostic();
-        anyhow!("Failed to execute statement at {}. {}", span_info, error)
+        assert!(self.unwinding.is_none()); // Unwinding should only be for terminator.
+        let span = self.body.blocks[bb_idx].statements[stmt_idx].span;
+        self.generate_error(span, error)
     }
 
     /// Add context to terminator execution errors
-    fn terminator_error(&self, bb_idx: BasicBlockIdx, error: anyhow::Error) -> anyhow::Error {
-        let span_info = self.body.blocks[bb_idx].terminator.span.diagnostic();
-        anyhow!("Failed to execute terminator at {}. {}", span_info, error)
+    fn terminator_error(&mut self, bb_idx: BasicBlockIdx, error: anyhow::Error) -> anyhow::Error {
+        let span = self.body.blocks[bb_idx].terminator.span;
+        self.generate_error(span, error)
     }
 
     /// Executes a single statement within a basic block.
@@ -268,7 +324,7 @@ impl FnInterpreter<'_> {
         };
 
         // Create new interpreter and call function
-        let result = invoke_fn(func_instance, self.memory, arg_values)?;
+        let result = invoke_fn(func_instance, self.memory, arg_values, self.unwinding)?;
 
         // Store result in destination
         self.assign_to_place(destination, result)?;

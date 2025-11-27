@@ -15,7 +15,7 @@ use clap::Parser;
 use rustc_public::{CompilerError, run};
 use std::ops::ControlFlow;
 use std::process::ExitCode;
-use tracing::{error, info};
+use tracing::info;
 
 #[derive(Parser)]
 #[command(name = "snapcrab")]
@@ -86,11 +86,9 @@ fn start_interpreter(start_fn: Option<String>) -> ControlFlow<()> {
     };
 
     match result {
-        Ok(exit_code) => {
-            info!("Interpretation completed with exit code: {:?}", exit_code);
-        }
+        Ok(_) => {}
         Err(e) => {
-            error!("Interpretation failed: {}", e);
+            eprintln!("{e}");
         }
     }
 

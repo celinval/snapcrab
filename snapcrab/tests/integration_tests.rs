@@ -197,10 +197,19 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_error_deep_call,
+    input = "diagnostic_test.rs",
+    start_fn = "error_deep_call",
+    result = TestResult::ErrorRegex(
+        r"(?s).*panicked at.*diagnostic_test.rs.*divide by zero.*".to_string()
+    )
+);
+
+check_custom_start!(
     test_division_by_zero_diagnostic,
     input = "diagnostic_test.rs",
-    start_fn = "division_by_zero",
+    start_fn = "div_by_zero",
     result = TestResult::ErrorRegex(
-        r".*Failed to execute.*diagnostic_test.rs.*divide by zero.*".to_string()
+        r"(?s).*panicked at.*diagnostic_test.rs.*divide by zero.*".to_string()
     )
 );

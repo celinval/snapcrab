@@ -74,7 +74,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
     }
 
     // Execute function
-    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![])?;
+    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
 
     // Get return type from instance
     let body = instance
@@ -88,7 +88,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
         value: result.as_bytes(),
     };
 
-    println!("Function '{}' returned: {}", fn_name, typed_result);
+    info!("Function '{}' returned: {}", fn_name, typed_result);
 
     Ok(result)
 }
@@ -104,7 +104,7 @@ pub fn run_main() -> Result<ExitCode> {
 }
 
 pub fn run(instance: Instance) -> Result<ExitCode> {
-    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![])?;
+    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
 
     // Convert the result value to an exit code
     match result {
