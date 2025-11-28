@@ -2,6 +2,7 @@
 members = [
     "snapcrab",
     "cargo-snap",
+    "snapcrab-installer",
 ]
 resolver = "2"
 

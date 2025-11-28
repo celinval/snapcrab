@@ -1,0 +1,20 @@
+[package]
+name = "snapcrab-installer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Installer for SnapCrab Rust interpreter"
+categories = ["development-tools", "command-line-utilities"]
+keywords = ["installer", "rust", "interpreter"]
+include = [
+    "src/**/*",
+    "../Cargo.lock",
+    "../README.md",
+    "../LICENSE-APACHE",
+    "../LICENSE-MIT",
+    "../rust-toolchain.toml",
+]
