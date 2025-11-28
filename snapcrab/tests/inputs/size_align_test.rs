@@ -1,5 +1,7 @@
-struct SimpleStruct {
+pub struct SimpleStruct {
+    #[allow(dead_code)]
     a: u8,
+    #[allow(dead_code)]
     b: u32,
 }
 

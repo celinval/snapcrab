@@ -2,7 +2,7 @@ use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
-use rustc_public::mir::{BinOp, CastKind, NullOp, Rvalue, UnOp};
+use rustc_public::mir::{AggregateKind, BinOp, CastKind, NullOp, Operand, Rvalue, UnOp};
 use rustc_public::ty::{IntTy, RigidTy, Ty, UintTy};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -223,17 +223,7 @@ impl<'a> FnInterpreter<'a> {
                 let value = self.evaluate_operand(operand)?;
                 self.perform_cast(cast_kind, value, target_ty)
             }
-            Rvalue::Aggregate(kind, operands) => match kind {
-                rustc_public::mir::AggregateKind::Tuple => {
-                    let mut values = Vec::new();
-                    for operand in operands {
-                        values.push(self.evaluate_operand(operand)?);
-                    }
-                    let ty = rvalue.ty(self.locals())?;
-                    Value::from_tuple_with_layout(&values, ty).context("Failed to create tuple")
-                }
-                _ => bail!("Unsupported aggregate kind: {:?}", kind),
-            },
+            Rvalue::Aggregate(kind, operands) => self.eval_aggregate(rvalue, kind, operands),
             Rvalue::NullaryOp(op, ty) => match op {
                 NullOp::AlignOf => Ok(Value::from_type(ty.alignment()?)),
                 NullOp::SizeOf => Ok(Value::from_type(ty.size()?)),
@@ -242,6 +232,36 @@ impl<'a> FnInterpreter<'a> {
             _ => {
                 bail!("Unsupported rvalue: {:?}", rvalue);
             }
+        }
+    }
+
+    fn eval_aggregate(
+        &self,
+        rvalue: &Rvalue,
+        kind: &AggregateKind,
+        operands: &[Operand],
+    ) -> std::result::Result<Value, anyhow::Error> {
+        match kind {
+            AggregateKind::Adt(def, _, _, _, Some(_field)) => {
+                debug_assert!(def.kind().is_union());
+                debug_assert_eq!(operands.len(), 1);
+                let value = self.evaluate_operand(&operands[0])?;
+                let ty = rvalue.ty(self.locals())?;
+                Ok(Value::from_val_with_padding(value, ty.size()?))
+            }
+            AggregateKind::Adt(def, _, _, _, _) if def.kind().is_enum() => {
+                // Need to implement set discriminant
+                bail!("Unsupported `enum` aggregation")
+            }
+            AggregateKind::Tuple | AggregateKind::Adt(..) | AggregateKind::Closure(..) => {
+                let mut values = Vec::new();
+                for operand in operands {
+                    values.push(self.evaluate_operand(operand)?);
+                }
+                let ty = rvalue.ty(self.locals())?;
+                Value::from_tuple_with_layout(&values, ty)
+            }
+            _ => bail!("Unsupported aggregate kind: {:?}", kind),
         }
     }
 

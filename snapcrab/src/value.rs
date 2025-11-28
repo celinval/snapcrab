@@ -128,6 +128,21 @@ impl std::fmt::Display for TypedValue<'_> {
 }
 
 impl Value {
+    /// Get the length of the value (= size in bytes)
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Get the size in bytes of this value
+    ///
+    /// Same as `[Value::len()]`.
+    #[inline]
+    #[allow(unused)]
+    pub fn size(&self) -> usize {
+        self.data.len()
+    }
+
     /// Get the raw bytes of the value
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
@@ -141,6 +156,15 @@ impl Value {
         &UNIT
     }
 
+    /// Create a initialized Value with the requested number of bytes
+    ///
+    /// We currently initialize it to zero.
+    pub fn with_size(num_bytes: usize) -> Self {
+        Self {
+            data: smallvec![0; num_bytes],
+        }
+    }
+
     /// Create value from boolean
     pub fn from_bool(value: bool) -> Self {
         Self {
@@ -152,20 +176,21 @@ impl Value {
     pub fn from_tuple_with_layout(values: &[Value], ty: Ty) -> Result<Self> {
         let layout = ty.layout()?;
         let shape = layout.shape();
-        if let rustc_public::abi::FieldsShape::Arbitrary { offsets } = &shape.fields {
+        if let FieldsShape::Arbitrary { offsets } = &shape.fields {
             let total_size = shape.size.bytes();
-            let mut data = SmallVec::from_elem(0u8, total_size);
+            let mut result = Self::with_size(total_size);
 
             for (i, value) in values.iter().enumerate() {
-                if let Some(offset) = offsets.get(i) {
+                if value.len() > 0
+                    && let Some(offset) = offsets.get(i)
+                {
                     let offset = offset.bytes();
                     let end = offset + value.data.len();
-                    if end <= data.len() {
-                        data[offset..end].copy_from_slice(&value.data);
-                    }
+                    debug_assert!(end <= total_size);
+                    result.data[offset..end].copy_from_slice(&value.data);
                 }
             }
-            Ok(Self { data })
+            Ok(result)
         } else {
             bail!("Cannot create tuple with layout for type: {:?}", ty)
         }
@@ -175,6 +200,27 @@ impl Value {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self {
             data: SmallVec::from_slice(bytes),
+        }
+    }
+
+    /// Create value from raw bytes with additional padding at the end
+    pub fn from_val_with_padding(src: Value, len: usize) -> Self {
+        if src.len() == len {
+            // simply move
+            src
+        } else if src.len() == 0 {
+            // Only padding bytes needed
+            Self::with_size(len)
+        } else {
+            debug_assert!(
+                src.len() < len,
+                "Expected at least `{}` bytes. Found `{}`",
+                len + 1,
+                src.len()
+            );
+            let mut new_val = Self::with_size(len);
+            new_val.data[0..src.len()].copy_from_slice(&src.data);
+            new_val
         }
     }
 
@@ -409,5 +455,52 @@ mod tests {
         assert_eq!(val1, val2);
         assert_ne!(val1, val3);
         assert_ne!(val1, val4); // Different sizes are not equal
+    }
+
+    #[test]
+    fn test_from_val_with_padding_same_size() {
+        let src = Value::from_type(42i32);
+        let result = Value::from_val_with_padding(src.clone(), 4);
+        assert_eq!(result.as_bytes(), &[42, 0, 0, 0]);
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_from_val_with_padding_add_padding() {
+        let src = Value::from_type(42i32);
+        let result = Value::from_val_with_padding(src, 8);
+        assert_eq!(result.as_bytes(), &[42, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn test_from_val_with_padding_empty_src() {
+        let src = Value::with_size(0);
+        let result = Value::from_val_with_padding(src, 4);
+        assert_eq!(result.as_bytes(), &[0u8, 0, 0, 0]);
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_from_val_with_padding_empty_to_empty() {
+        let src = Value::with_size(0);
+        let result = Value::from_val_with_padding(src, 0);
+        assert_eq!(result.as_bytes(), &[] as &[u8]);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_from_val_with_padding_one_byte() {
+        let src = Value::from_type(255u8);
+        let result = Value::from_val_with_padding(src, 4);
+        assert_eq!(result.as_bytes(), &[255, 0, 0, 0]);
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "Expected at least")]
+    fn test_from_val_with_padding_src_too_large() {
+        let src = Value::from_type(42i32);
+        let _ = Value::from_val_with_padding(src, 2);
     }
 }
