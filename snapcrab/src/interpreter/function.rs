@@ -2,7 +2,7 @@ use std::thread;
 
 use crate::memory::ThreadMemory;
 use crate::value::Value;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
 use rustc_public::ty::{ConstantKind, MirConst, RigidTy, TyKind};
@@ -279,7 +279,7 @@ impl FnInterpreter<'_> {
                 let cond_value = self.evaluate_operand(&cond)?;
                 let cond_bool = cond_value
                     .as_bool()
-                    .ok_or_else(|| anyhow!("Assert condition must be a boolean"))?;
+                    .context("Assert condition must be a boolean")?;
 
                 if cond_bool == expected {
                     Ok(ControlFlow::Continue(target))

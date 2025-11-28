@@ -1,6 +1,6 @@
 use crate::ty::MonoType;
 use crate::value::Value;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
 use rustc_public::mir::{BinOp, CastKind, NullOp, Rvalue, UnOp};
 use rustc_public::ty::{IntTy, RigidTy, Ty, UintTy};
@@ -116,22 +116,22 @@ where
         BinOp::Add => left
             .checked_add(&right)
             .map(Value::from_type)
-            .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow")),
+            .with_context(|| format!("Attempt to {op:?} with overflow")),
         BinOp::Sub => left
             .checked_sub(&right)
             .map(Value::from_type)
-            .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow")),
+            .with_context(|| format!("Attempt to {op:?} with overflow")),
         BinOp::Mul => left
             .checked_mul(&right)
             .map(Value::from_type)
-            .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow")),
+            .with_context(|| format!("Attempt to {op:?} with overflow")),
         BinOp::Div => {
             if right == <T as Zero>::zero() {
                 bail!("Division by zero");
             }
             left.checked_div(&right)
                 .map(Value::from_type)
-                .ok_or_else(|| anyhow!("Attempt to {op:?} with overflow"))
+                .with_context(|| format!("Attempt to {op:?} with overflow"))
         }
         BinOp::BitAnd => Ok(Value::from_type(left & right)),
         BinOp::BitOr => Ok(Value::from_type(left | right)),
@@ -170,7 +170,7 @@ where
         UnOp::Neg => val
             .checked_neg()
             .map(Value::from_type)
-            .ok_or_else(|| anyhow::anyhow!("Integer overflow in negation")),
+            .context("Integer overflow in negation"),
         _ => bail!("Unsupported integer unary operation: {:?}", op),
     }
 }
@@ -230,8 +230,7 @@ impl<'a> FnInterpreter<'a> {
                         values.push(self.evaluate_operand(operand)?);
                     }
                     let ty = rvalue.ty(self.locals())?;
-                    Value::from_tuple_with_layout(&values, ty)
-                        .map_err(|e| anyhow::anyhow!("Failed to create tuple: {}", e))
+                    Value::from_tuple_with_layout(&values, ty).context("Failed to create tuple")
                 }
                 _ => bail!("Unsupported aggregate kind: {:?}", kind),
             },

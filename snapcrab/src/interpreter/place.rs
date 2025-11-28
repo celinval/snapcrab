@@ -6,7 +6,7 @@
 
 use crate::ty::MonoType;
 use crate::value::Value;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use rustc_public::mir::{Place, ProjectionElem};
 use rustc_public::ty::{RigidTy, TyKind};
 
@@ -45,7 +45,7 @@ impl<'a> function::FnInterpreter<'a> {
                         let ptr_value = self.memory.read_addr(current_addr, current_ty)?;
                         let address = ptr_value
                             .as_type::<usize>()
-                            .ok_or_else(|| anyhow::anyhow!("Expected usize pointer value"))?;
+                            .context("Expected usize pointer value")?;
 
                         Ok((address, pointee_ty))
                     }
@@ -55,8 +55,8 @@ impl<'a> function::FnInterpreter<'a> {
                         let field_offset = match layout.shape().fields {
                             rustc_public::abi::FieldsShape::Arbitrary { ref offsets } => offsets
                                 .get(*field_idx)
-                                .ok_or_else(|| {
-                                    anyhow::anyhow!("Field index {} out of bounds", field_idx)
+                                .with_context(|| {
+                                    format!("Field index {} out of bounds", field_idx)
                                 })?
                                 .bytes(),
                             _ => bail!("Unsupported field layout for type: {:?}", current_ty),

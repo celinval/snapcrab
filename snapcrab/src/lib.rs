@@ -23,7 +23,7 @@ mod value;
 use crate::interpreter::function::invoke_fn;
 use crate::memory::ThreadMemory;
 use crate::value::{TypedValue, Value};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::{CrateDef, CrateItem, entry_fn, local_crate};
 use std::process::ExitCode;
@@ -54,7 +54,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
         .fn_defs()
         .into_iter()
         .find(|def| def.name() == fn_name)
-        .ok_or_else(|| anyhow::anyhow!("Function '{}' not found", fn_name))?;
+        .with_context(|| format!("Function '{}' not found", fn_name))?;
 
     info!("Found function: {}", fn_def.name());
 
@@ -63,12 +63,10 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
 
     // Try to convert to instance
     let instance = Instance::try_from(crate_item)
-        .map_err(|e| anyhow::anyhow!("Failed to create instance from function: {}", e))?;
+        .with_context(|| format!("Failed to create instance from function: {}", fn_name))?;
 
     // Check if function takes no arguments
-    let body = instance
-        .body()
-        .ok_or_else(|| anyhow::anyhow!("No body for function"))?;
+    let body = instance.body().context("No body for function")?;
     let arg_count = body.arg_locals().len();
 
     if arg_count > 0 {
@@ -83,9 +81,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
     let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
 
     // Get return type from instance
-    let body = instance
-        .body()
-        .ok_or_else(|| anyhow::anyhow!("No body for function"))?;
+    let body = instance.body().context("No body for function")?;
     let return_ty = body.ret_local().ty;
 
     // Create typed value and print
@@ -100,11 +96,11 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
 }
 
 pub fn run_main() -> Result<ExitCode> {
-    let entry_fn = entry_fn().ok_or_else(|| anyhow::anyhow!("No entry function found"))?;
+    let entry_fn = entry_fn().context("No entry function found")?;
     info!("Found entry function: {}", entry_fn.name());
 
-    let instance = Instance::try_from(entry_fn)
-        .map_err(|e| anyhow::anyhow!("Failed to create instance from entry function: {}", e))?;
+    let instance =
+        Instance::try_from(entry_fn).context("Failed to create instance from entry function")?;
 
     let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
 
