@@ -16,27 +16,27 @@ cargo build --release
 
 SnapCrab is designed to execute small Rust programs and unit tests without compilation overhead.
 
-### Running Functions
+### Running the Main Function
 
-Execute a specific function by name:
+Execute the main function of a Rust source file:
 
 ```bash
-cargo run -- function <function_name>
+snapcrab <file.rs>
 ```
 
-### Running Tests
+### Running a Specific Function
 
-Execute unit tests instantly:
+Execute a specific function by name (requires fully qualified name):
 
 ```bash
-cargo run -- test
+snapcrab --start-fn <function_name> <file.rs>
 ```
 
 ## Limitations
 
 Current limitations in the early development phase:
 - Limited subset of Rust syntax supported
-- Small binary programs only
+- Small binary programs only / no cargo support yet
 - Basic language constructs
 - Linux x86-64 target only
 
