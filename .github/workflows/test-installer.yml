@@ -1,0 +1,33 @@
+# Test the snapcrab-installer by packaging snapcrab and installing from the .crate file.
+# This validates that the installer can extract and install snapcrab with proper rpath configuration.
+
+name: Test Installer
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustc-dev, llvm-tools
+      
+      - name: Package snapcrab crate
+        run: cargo package -p snapcrab --no-verify
+      
+      - name: Build and run installer
+        run: |
+          cargo build -p snapcrab-installer --release
+          ./target/release/snapcrab-installer --path target/package
+      
+      - name: Verify installation
+        run: snapcrab --help
