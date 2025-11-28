@@ -4,7 +4,6 @@
 mod common;
 
 use common::TestResult;
-use snapcrab::value::Value;
 
 check_interpreter!(
     test_simple_success,
@@ -29,7 +28,7 @@ check_custom_start!(
     test_valid_custom_start,
     input = "valid_custom_start.rs",
     start_fn = "my_custom_start",
-    result = TestResult::SuccessWithValue(Value::from_type(123))
+    result = TestResult::SuccessWithValue(vec![123, 0, 0, 0])
 );
 
 check_custom_start!(
@@ -50,56 +49,56 @@ check_custom_start!(
     test_tuple_creation,
     input = "tuple_function.rs",
     start_fn = "simple_tuple",
-    result = TestResult::SuccessWithValue(Value::from_bytes(&[1, 42, 0, 0, 232, 3, 0, 0]))
+    result = TestResult::SuccessWithValue(vec![1, 42, 0, 0, 232, 3, 0, 0])
 );
 
 check_custom_start!(
     test_simple_tuple_ops,
     input = "tuple_operations.rs",
     start_fn = "simple_tuple",
-    result = TestResult::SuccessWithValue(Value::from_bytes(&[1, 42, 0, 0, 232, 3, 0, 0]))
+    result = TestResult::SuccessWithValue(vec![1, 42, 0, 0, 232, 3, 0, 0])
 );
 
 check_custom_start!(
     test_unit_tuple,
     input = "tuple_operations.rs",
     start_fn = "unit_tuple",
-    result = TestResult::SuccessWithValue(Value::unit().clone())
+    result = TestResult::SuccessWithValue(vec![])
 );
 
 check_custom_start!(
     test_single_element_tuple,
     input = "tuple_operations.rs",
     start_fn = "single_element_tuple",
-    result = TestResult::SuccessWithValue(Value::from_type(42))
+    result = TestResult::SuccessWithValue(vec![42, 0, 0, 0])
 );
 
 check_custom_start!(
     test_reordered_tuple,
     input = "tuple_operations.rs",
     start_fn = "reordered_tuple",
-    result = TestResult::SuccessWithValue(Value::from_bytes(&[232, 3, 0, 0, 42, 1, 0, 0]))
+    result = TestResult::SuccessWithValue(vec![232, 3, 0, 0, 42, 1, 0, 0])
 );
 
 check_custom_start!(
     test_another_order,
     input = "tuple_operations.rs",
     start_fn = "another_order",
-    result = TestResult::SuccessWithValue(Value::from_bytes(&[232, 3, 0, 0, 1, 42, 0, 0]))
+    result = TestResult::SuccessWithValue(vec![232, 3, 0, 0, 1, 42, 0, 0])
 );
 
 check_custom_start!(
     test_bool_return,
     input = "bool_function.rs",
     start_fn = "returns_true",
-    result = TestResult::SuccessWithValue(Value::from_bool(true))
+    result = TestResult::SuccessWithValue(vec![1])
 );
 
 check_custom_start!(
     test_mut_reference,
     input = "reference_test.rs",
     start_fn = "test_mut_ref",
-    result = TestResult::SuccessWithValue(Value::from_type(100i32))
+    result = TestResult::SuccessWithValue(vec![100, 0, 0, 0])
 );
 
 check_custom_start!(
@@ -120,14 +119,14 @@ check_custom_start!(
     test_mutable_reference_chain,
     input = "reference_test.rs",
     start_fn = "test_mut_ref_chain",
-    result = TestResult::SuccessWithValue(Value::from_type(15i32))
+    result = TestResult::SuccessWithValue(vec![15, 0, 0, 0])
 );
 
 check_custom_start!(
     test_basic_reference,
     input = "reference_test.rs",
     start_fn = "test_basic_ref",
-    result = TestResult::SuccessWithValue(Value::from_type(42i32))
+    result = TestResult::SuccessWithValue(vec![42, 0, 0, 0])
 );
 
 #[cfg(target_endian = "little")]
@@ -135,7 +134,7 @@ check_custom_start!(
     test_tuple_field_ref,
     input = "reference_test.rs",
     start_fn = "test_tuple_field_ref",
-    result = TestResult::SuccessWithValue(Value::from_bytes(&[52, 10]))
+    result = TestResult::SuccessWithValue(vec![52, 10])
 );
 
 check_custom_start!(
@@ -149,7 +148,7 @@ check_custom_start!(
     test_tuple_field_sub,
     input = "tuple_operations.rs",
     start_fn = "tuple_field_sub",
-    result = TestResult::SuccessWithValue(Value::from_type(42i8))
+    result = TestResult::SuccessWithValue(vec![42])
 );
 
 check_custom_start!(
@@ -163,7 +162,7 @@ check_custom_start!(
     test_ptr_compare,
     input = "raw_pointer_test.rs",
     start_fn = "ptr_compare",
-    result = TestResult::SuccessWithValue(Value::from_bool(true))
+    result = TestResult::SuccessWithValue(vec![1])
 );
 
 check_custom_start!(
@@ -186,14 +185,14 @@ check_custom_start!(
     test_check_size_of,
     input = "size_align_test.rs",
     start_fn = "check_size_of",
-    result = TestResult::SuccessWithValue(Value::from_bool(true))
+    result = TestResult::SuccessWithValue(vec![1])
 );
 
 check_custom_start!(
     test_check_align_of,
     input = "size_align_test.rs",
     start_fn = "check_align_of",
-    result = TestResult::SuccessWithValue(Value::from_bool(true))
+    result = TestResult::SuccessWithValue(vec![1])
 );
 
 check_custom_start!(

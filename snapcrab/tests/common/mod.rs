@@ -5,14 +5,13 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-use snapcrab::value::Value;
 use std::path::Path;
 use std::process::ExitCode;
 
 #[derive(Debug)]
 pub enum TestResult {
     Success,
-    SuccessWithValue(Value),
+    SuccessWithValue(Vec<u8>),
     Error(String),
     ErrorRegex(String),
 }

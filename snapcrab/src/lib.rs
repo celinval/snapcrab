@@ -22,7 +22,7 @@ mod value;
 
 use crate::interpreter::function::invoke_fn;
 use crate::memory::ThreadMemory;
-use crate::value::{TypedValue, Value};
+use crate::value::TypedValue;
 use anyhow::{Context, Result, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::{CrateDef, CrateItem, entry_fn, local_crate};
@@ -47,7 +47,7 @@ use tracing::info;
 /// // Execute a function named "my_test"
 /// let result = run_function("my_test")?;
 /// ```
-pub fn run_function(fn_name: &str) -> Result<Value> {
+pub fn run_function(fn_name: &str) -> Result<Vec<u8>> {
     // Find function definition by name
     let crate_def = local_crate();
     let fn_def = crate_def
@@ -92,7 +92,7 @@ pub fn run_function(fn_name: &str) -> Result<Value> {
 
     info!("Function '{}' returned: {}", fn_name, typed_result);
 
-    Ok(result)
+    Ok(result.as_bytes().to_vec())
 }
 
 pub fn run_main() -> Result<ExitCode> {
