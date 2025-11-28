@@ -17,6 +17,7 @@ include = [
     "../README.md",
     "../LICENSE-APACHE",
     "../LICENSE-MIT",
+    "../rust-toolchain.toml",
 ]
 
 [[bin]]

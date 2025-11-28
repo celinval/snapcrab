@@ -13,6 +13,7 @@ pub trait MonoType {
     fn is_thin_ptr(&self) -> bool;
 
     /// Check if this is a wide pointer (two usize values).
+    #[allow(dead_code)]
     fn is_wide_ptr(&self) -> bool;
 }
 

@@ -84,6 +84,7 @@ impl Stack {
         result
     }
 
+    #[allow(dead_code)]
     pub fn read_local(&self, local: usize) -> Result<Value> {
         self.frames.last().unwrap().read_local(local)
     }

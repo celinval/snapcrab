@@ -16,12 +16,6 @@ struct HeapImpl {
     values: Vec<Value>,
 }
 
-impl Heap {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 unsafe impl MemorySegment for Heap {
     fn read_addr(&self, _address: usize, _size: usize) -> Result<&[u8], MemoryAccessError> {
         tracing::error!("Heap memory access not yet supported");

@@ -62,6 +62,7 @@ impl ThreadMemory {
     /// Read local variable.
     /// TODO: Use rustc_public Local here and in subsequent calls
     #[inline]
+    #[allow(dead_code)]
     pub fn read_local(&self, local: usize) -> Result<Value> {
         self.stack.read_local(local)
     }

@@ -1,18 +1,24 @@
 //! SnapCrab Interpreter Library
 //!
 //! A rustc wrapper that leverages `rustc_public` to interpret Rust code at the MIR level.
+//!
+//! # Warning
+//!
+//! This library is not meant to be used outside of snapcrab binary.
+//! Semantic versioning will only apply snapcrab binary.
 
 #![feature(rustc_private)]
+#![doc(hidden)]
 
 extern crate rustc_driver;
 extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-pub mod interpreter;
-pub mod memory;
-pub mod ty;
-pub mod value;
+mod interpreter;
+mod memory;
+mod ty;
+mod value;
 
 use crate::interpreter::function::invoke_fn;
 use crate::memory::ThreadMemory;
@@ -100,10 +106,6 @@ pub fn run_main() -> Result<ExitCode> {
     let instance = Instance::try_from(entry_fn)
         .map_err(|e| anyhow::anyhow!("Failed to create instance from entry function: {}", e))?;
 
-    run(instance)
-}
-
-pub fn run(instance: Instance) -> Result<ExitCode> {
     let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
 
     // Convert the result value to an exit code
