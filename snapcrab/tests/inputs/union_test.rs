@@ -33,10 +33,23 @@ pub union MultiFieldUnion {
 }
 
 pub fn assign_all_fields() -> u32 {
+    let mut u = MultiFieldUnion { byte: 0xFF };
     unsafe {
-        let mut u = MultiFieldUnion { byte: 0xFF };
         u.word = 0xABCD;
         u.dword = 0x12345678;
         u.dword
+    }
+}
+
+pub fn read_union_field() -> i32 {
+    let u = SimpleUnion { int_val: 42 };
+    unsafe { u.int_val }
+}
+
+pub fn write_union_field() -> SimpleUnion {
+    let mut u = SimpleUnion { int_val: 10 };
+    unsafe {
+        u.int_val = 77;
+        u
     }
 }

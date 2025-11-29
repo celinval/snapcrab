@@ -59,6 +59,10 @@ impl<'a> function::FnInterpreter<'a> {
                                     format!("Field index {} out of bounds", field_idx)
                                 })?
                                 .bytes(),
+                            rustc_public::abi::FieldsShape::Union(_) => {
+                                // All union fields start at offset 0
+                                0
+                            }
                             _ => bail!("Unsupported field layout for type: {:?}", current_ty),
                         };
                         Ok((current_addr + field_offset, *field_ty))

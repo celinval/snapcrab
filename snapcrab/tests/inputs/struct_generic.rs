@@ -21,3 +21,22 @@ pub fn create_triple_i32_unit_bool() -> Triple<i32, (), bool> {
         third: true,
     }
 }
+
+pub fn read_generic_field() -> i32 {
+    let t = Triple {
+        first: 99i32,
+        second: (),
+        third: false,
+    };
+    t.first
+}
+
+pub fn write_generic_field() -> Triple<i32, (), bool> {
+    let mut t = Triple {
+        first: 1i32,
+        second: (),
+        third: false,
+    };
+    t.third = true;
+    t
+}

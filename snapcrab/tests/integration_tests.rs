@@ -228,6 +228,20 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![42, 0, 0, 0])
 );
 
+check_custom_start!(
+    test_read_struct_field,
+    input = "struct_single.rs",
+    start_fn = "read_field",
+    result = TestResult::SuccessWithValue(vec![100, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_write_struct_field,
+    input = "struct_single.rs",
+    start_fn = "write_field",
+    result = TestResult::SuccessWithValue(vec![50, 0, 0, 0])
+);
+
 #[cfg(target_endian = "little")]
 check_custom_start!(
     test_generic_struct_u8_u128_i16,
@@ -247,10 +261,45 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_read_generic_field,
+    input = "struct_generic.rs",
+    start_fn = "read_generic_field",
+    result = TestResult::SuccessWithValue(vec![99, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_write_generic_field,
+    input = "struct_generic.rs",
+    start_fn = "write_generic_field",
+    result = TestResult::SuccessWithValue(vec![1, 0, 0, 0, 1, 0, 0, 0])
+);
+
+check_custom_start!(
     test_nested_struct,
     input = "struct_nested.rs",
     start_fn = "create_nested",
     result = TestResult::SuccessWithValue(vec![10, 0, 0, 0, 20, 0, 0, 0, 1, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_read_nested_field,
+    input = "struct_nested.rs",
+    start_fn = "read_nested_field",
+    result = TestResult::SuccessWithValue(vec![5, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_write_nested_field,
+    input = "struct_nested.rs",
+    start_fn = "write_nested_field",
+    result = TestResult::SuccessWithValue(vec![1, 0, 0, 0, 99, 0, 0, 0, 1, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_struct_to_tuple,
+    input = "struct_nested.rs",
+    start_fn = "struct_to_tuple",
+    result = TestResult::SuccessWithValue(vec![7, 0, 0, 0, 8, 0, 0, 0, 1, 0, 0, 0])
 );
 
 // Union tests
@@ -286,5 +335,19 @@ check_custom_start!(
     test_union_assign_all_fields,
     input = "union_test.rs",
     start_fn = "assign_all_fields",
-    result = TestResult::ErrorRegex(r".*Unsupported field layout.*".to_string())
+    result = TestResult::SuccessWithValue(vec![120, 86, 52, 18])
+);
+
+check_custom_start!(
+    test_read_union_field,
+    input = "union_test.rs",
+    start_fn = "read_union_field",
+    result = TestResult::SuccessWithValue(vec![42, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_write_union_field,
+    input = "union_test.rs",
+    start_fn = "write_union_field",
+    result = TestResult::SuccessWithValue(vec![77, 0, 0, 0])
 );
