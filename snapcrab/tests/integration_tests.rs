@@ -351,3 +351,57 @@ check_custom_start!(
     start_fn = "write_union_field",
     result = TestResult::SuccessWithValue(vec![77, 0, 0, 0])
 );
+
+// Array tests
+check_custom_start!(
+    test_empty_array,
+    input = "array_test.rs",
+    start_fn = "create_empty_array",
+    result = TestResult::SuccessWithValue(vec![])
+);
+
+check_custom_start!(
+    test_array_repeat,
+    input = "array_test.rs",
+    start_fn = "create_array_repeat",
+    result = TestResult::SuccessWithValue(vec![
+        42, 0, 0, 0, 42, 0, 0, 0, 42, 0, 0, 0, 42, 0, 0, 0, 42, 0, 0, 0
+    ])
+);
+
+check_custom_start!(
+    test_array_explicit,
+    input = "array_test.rs",
+    start_fn = "create_array_explicit",
+    result = TestResult::SuccessWithValue(vec![10, 0, 0, 0, 20, 0, 0, 0, 30, 0, 0, 0, 40, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_struct_array_repeat,
+    input = "array_test.rs",
+    start_fn = "create_struct_array_repeat",
+    result = TestResult::SuccessWithValue(vec![
+        1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0
+    ])
+);
+
+check_custom_start!(
+    test_struct_array_explicit,
+    input = "array_test.rs",
+    start_fn = "create_struct_array_explicit",
+    result = TestResult::SuccessWithValue(vec![5, 0, 0, 0, 10, 0, 0, 0, 15, 0, 0, 0, 20, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_single_element_array,
+    input = "array_test.rs",
+    start_fn = "create_single_element_array",
+    result = TestResult::SuccessWithValue(vec![99, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_zero_array,
+    input = "array_test.rs",
+    start_fn = "create_zero_array",
+    result = TestResult::SuccessWithValue(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+);

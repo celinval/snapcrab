@@ -192,7 +192,8 @@ impl Value {
             }
             Ok(result)
         } else {
-            bail!("Cannot create tuple with layout for type: {:?}", ty)
+            // TODO: Create a panic hook for handling internal errors.
+            panic!("Expected tuple with arbitrary layout, but found `{shape:?}` for {ty}");
         }
     }
 
@@ -201,6 +202,22 @@ impl Value {
         Self {
             data: SmallVec::from_slice(bytes),
         }
+    }
+
+    /// Create array by repeating a value
+    pub fn from_repeated(value: &Value, count: usize) -> Self {
+        Self {
+            data: SmallVec::from_vec(value.data.as_slice().repeat(count)),
+        }
+    }
+
+    /// Create array from values
+    pub fn from_array(values: &[Value]) -> Self {
+        let mut data = SmallVec::new();
+        for value in values {
+            data.extend_from_slice(&value.data);
+        }
+        Self { data }
     }
 
     /// Create value from raw bytes with additional padding at the end

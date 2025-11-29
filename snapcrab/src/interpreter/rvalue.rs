@@ -224,6 +224,11 @@ impl<'a> FnInterpreter<'a> {
                 self.perform_cast(cast_kind, value, target_ty)
             }
             Rvalue::Aggregate(kind, operands) => self.eval_aggregate(rvalue, kind, operands),
+            Rvalue::Repeat(operand, count) => {
+                let value = self.evaluate_operand(operand)?;
+                let count_val = count.eval_target_usize()? as usize;
+                Ok(Value::from_repeated(&value, count_val))
+            }
             Rvalue::NullaryOp(op, ty) => match op {
                 NullOp::AlignOf => Ok(Value::from_type(ty.alignment()?)),
                 NullOp::SizeOf => Ok(Value::from_type(ty.size()?)),
@@ -260,6 +265,13 @@ impl<'a> FnInterpreter<'a> {
                 }
                 let ty = rvalue.ty(self.locals())?;
                 Value::from_tuple_with_layout(&values, ty)
+            }
+            AggregateKind::Array(_) => {
+                let mut values = Vec::new();
+                for operand in operands {
+                    values.push(self.evaluate_operand(operand)?);
+                }
+                Ok(Value::from_array(&values))
             }
             _ => bail!("Unsupported aggregate kind: {:?}", kind),
         }
