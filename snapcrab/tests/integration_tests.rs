@@ -45,18 +45,28 @@ check_custom_start!(
     result = TestResult::ErrorRegex(r".*Failed to create instance.*".to_string())
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_tuple_creation,
     input = "tuple_function.rs",
     start_fn = "simple_tuple",
-    result = TestResult::SuccessWithValue(vec![1, 42, 0, 0, 232, 3, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        1,
+        42, 0, 0,
+        232, 3, 0, 0
+    ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_simple_tuple_ops,
     input = "tuple_operations.rs",
     start_fn = "simple_tuple",
-    result = TestResult::SuccessWithValue(vec![1, 42, 0, 0, 232, 3, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        1,
+        42, 0, 0,
+        232, 3, 0, 0
+    ])
 );
 
 check_custom_start!(
@@ -73,18 +83,27 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![42, 0, 0, 0])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_reordered_tuple,
     input = "tuple_operations.rs",
     start_fn = "reordered_tuple",
-    result = TestResult::SuccessWithValue(vec![232, 3, 0, 0, 42, 1, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        232, 3, 0, 0,
+        42, 1, 0, 0
+    ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_another_order,
     input = "tuple_operations.rs",
     start_fn = "another_order",
-    result = TestResult::SuccessWithValue(vec![232, 3, 0, 0, 1, 42, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        232, 3, 0, 0,
+        1,
+        42, 0, 0
+    ])
 );
 
 check_custom_start!(
@@ -242,22 +261,28 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![50, 0, 0, 0])
 );
 
+#[rustfmt::skip]
 #[cfg(target_endian = "little")]
 check_custom_start!(
     test_generic_struct_u8_u128_i16,
     input = "struct_generic.rs",
     start_fn = "create_triple_u8_u128_i16",
     result = TestResult::SuccessWithValue(vec![
-        232, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 206, 255, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0
+        232, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        206, 255,
+        10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_generic_struct_i32_unit_bool,
     input = "struct_generic.rs",
     start_fn = "create_triple_i32_unit_bool",
-    result = TestResult::SuccessWithValue(vec![42, 0, 0, 0, 1, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        42, 0, 0, 0,
+        1, 0, 0, 0
+    ])
 );
 
 check_custom_start!(
@@ -267,18 +292,27 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![99, 0, 0, 0])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_write_generic_field,
     input = "struct_generic.rs",
     start_fn = "write_generic_field",
-    result = TestResult::SuccessWithValue(vec![1, 0, 0, 0, 1, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        1, 0, 0, 0,
+        1, 0, 0, 0
+    ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_nested_struct,
     input = "struct_nested.rs",
     start_fn = "create_nested",
-    result = TestResult::SuccessWithValue(vec![10, 0, 0, 0, 20, 0, 0, 0, 1, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        10, 0, 0, 0,
+        20, 0, 0, 0,
+        1, 0, 0, 0
+    ])
 );
 
 check_custom_start!(
@@ -288,18 +322,28 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![5, 0, 0, 0])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_write_nested_field,
     input = "struct_nested.rs",
     start_fn = "write_nested_field",
-    result = TestResult::SuccessWithValue(vec![1, 0, 0, 0, 99, 0, 0, 0, 1, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        1, 0, 0, 0,
+        99, 0, 0, 0,
+        1, 0, 0, 0
+    ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_struct_to_tuple,
     input = "struct_nested.rs",
     start_fn = "struct_to_tuple",
-    result = TestResult::SuccessWithValue(vec![7, 0, 0, 0, 8, 0, 0, 0, 1, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        7, 0, 0, 0,
+        8, 0, 0, 0,
+        1, 0, 0, 0
+    ])
 );
 
 // Union tests
@@ -360,36 +404,54 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_array_repeat,
     input = "array_test.rs",
     start_fn = "create_array_repeat",
     result = TestResult::SuccessWithValue(vec![
-        42, 0, 0, 0, 42, 0, 0, 0, 42, 0, 0, 0, 42, 0, 0, 0, 42, 0, 0, 0
+        42, 0, 0, 0,
+        42, 0, 0, 0,
+        42, 0, 0, 0,
+        42, 0, 0, 0,
+        42, 0, 0, 0
     ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_array_explicit,
     input = "array_test.rs",
     start_fn = "create_array_explicit",
-    result = TestResult::SuccessWithValue(vec![10, 0, 0, 0, 20, 0, 0, 0, 30, 0, 0, 0, 40, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        10, 0, 0, 0,
+        20, 0, 0, 0,
+        30, 0, 0, 0,
+        40, 0, 0, 0
+    ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_struct_array_repeat,
     input = "array_test.rs",
     start_fn = "create_struct_array_repeat",
     result = TestResult::SuccessWithValue(vec![
-        1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0
+        1, 0, 0, 0, 2, 0, 0, 0,
+        1, 0, 0, 0, 2, 0, 0, 0,
+        1, 0, 0, 0, 2, 0, 0, 0
     ])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_struct_array_explicit,
     input = "array_test.rs",
     start_fn = "create_struct_array_explicit",
-    result = TestResult::SuccessWithValue(vec![5, 0, 0, 0, 10, 0, 0, 0, 15, 0, 0, 0, 20, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        5, 0, 0, 0, 10, 0, 0, 0,
+        15, 0, 0, 0, 20, 0, 0, 0
+    ])
 );
 
 check_custom_start!(
@@ -399,9 +461,68 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![99, 0, 0, 0])
 );
 
+#[rustfmt::skip]
 check_custom_start!(
     test_zero_array,
     input = "array_test.rs",
     start_fn = "create_zero_array",
-    result = TestResult::SuccessWithValue(vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    result = TestResult::SuccessWithValue(vec![
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0
+    ])
+);
+
+check_custom_start!(
+    test_read_array_element,
+    input = "array_test.rs",
+    start_fn = "read_array_element",
+    result = TestResult::SuccessWithValue(vec![30, 0, 0, 0])
+);
+
+#[rustfmt::skip]
+check_custom_start!(
+    test_write_array_element,
+    input = "array_test.rs",
+    start_fn = "write_array_element",
+    result = TestResult::SuccessWithValue(vec![
+        1, 0, 0, 0,
+        99, 0, 0, 0,
+        3, 0, 0, 0,
+        4, 0, 0, 0
+    ])
+);
+
+check_custom_start!(
+    test_read_struct_array_element,
+    input = "array_test.rs",
+    start_fn = "read_struct_array_element",
+    result = TestResult::SuccessWithValue(vec![3, 0, 0, 0, 4, 0, 0, 0])
+);
+
+#[rustfmt::skip]
+check_custom_start!(
+    test_write_struct_array_element,
+    input = "array_test.rs",
+    start_fn = "write_struct_array_element",
+    result = TestResult::SuccessWithValue(vec![
+        0, 0, 0, 0, 0, 0, 0, 0,
+        5, 0, 0, 0, 10, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0
+    ])
+);
+
+#[rustfmt::skip]
+check_custom_start!(
+    test_write_via_mut_ref,
+    input = "array_test.rs",
+    start_fn = "write_via_mut_ref",
+    result = TestResult::SuccessWithValue(vec![
+        10, 0, 0, 0,
+        20, 0, 0, 0,
+        99, 0, 0, 0,
+        40, 0, 0, 0,
+        50, 0, 0, 0
+    ])
 );

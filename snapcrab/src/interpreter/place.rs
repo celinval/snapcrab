@@ -8,7 +8,7 @@ use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use rustc_public::mir::{Place, ProjectionElem};
-use rustc_public::ty::{RigidTy, TyKind};
+use rustc_public::ty::{RigidTy, Ty, TyKind};
 
 use super::function;
 
@@ -67,7 +67,33 @@ impl<'a> function::FnInterpreter<'a> {
                         };
                         Ok((current_addr + field_offset, *field_ty))
                     }
-                    _ => bail!("Unsupported place projection: {:?}", projection),
+                    ProjectionElem::Index(local) => {
+                        // Get the index value from the local
+                        let index_value = self.memory.read_local(*local, Ty::usize_ty())?;
+                        let index = index_value
+                            .as_type::<usize>()
+                            .context("Expected usize index value")?;
+
+                        // Get array element type and stride
+                        let (element_ty, stride) = match current_ty.kind() {
+                            TyKind::RigidTy(RigidTy::Array(elem_ty, _)) => {
+                                let layout = current_ty.layout()?;
+                                let stride = match layout.shape().fields {
+                                    rustc_public::abi::FieldsShape::Array { stride, .. } => {
+                                        stride.bytes()
+                                    }
+                                    shape => bail!(
+                                        "Expected array field shape for `{current_ty:?}`: {shape:?}"
+                                    ),
+                                };
+                                (elem_ty, stride)
+                            }
+                            _ => bail!("Cannot index non-array type: {current_ty:?}"),
+                        };
+
+                        Ok((current_addr + index * stride, element_ty))
+                    }
+                    _ => bail!("Unsupported place projection: {projection:?}"),
                 }
             },
         )?;

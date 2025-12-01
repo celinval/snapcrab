@@ -19,6 +19,7 @@ use crate::value::Value;
 use anyhow::Result;
 use rustc_public::mir::Body;
 use rustc_public::mir::mono::Instance;
+use rustc_public::ty::Ty;
 use std::pin::Pin;
 
 use super::ThreadMemory;
@@ -85,8 +86,8 @@ impl Stack {
     }
 
     #[allow(dead_code)]
-    pub fn read_local(&self, local: usize) -> Result<Value> {
-        self.frames.last().unwrap().read_local(local)
+    pub fn read_local(&self, local: usize, local_ty: Ty) -> Result<Value> {
+        self.frames.last().unwrap().read_local(local, local_ty)
     }
 
     pub fn write_local(&mut self, local: usize, value: Value) -> Result<()> {
@@ -160,19 +161,22 @@ impl StackFrame {
     }
 
     /// Gets a local variable value
-    pub fn read_local(&self, local: usize) -> Result<Value> {
+    pub fn read_local(&self, local: usize, local_ty: Ty) -> Result<Value> {
         if local >= self.offsets.len() {
             anyhow::bail!("Local index {} out of bounds", local);
         }
 
         let offset = self.offsets[local];
-        let next_offset = if local + 1 < self.offsets.len() {
-            self.offsets[local + 1]
-        } else {
-            self.data.len()
-        };
 
-        let bytes = &self.data[offset..next_offset];
+        // Check alignment
+        debug_assert!(
+            (self.data.as_ptr() as usize + offset).is_multiple_of(local_ty.alignment()?),
+            "Local variables should be aligned. But found {:p} for type {local_ty:?}",
+            self.data.as_ptr(),
+        );
+
+        let size = local_ty.size()?;
+        let bytes = &self.data[offset..offset + size];
         Ok(Value::from_bytes(bytes))
     }
 
