@@ -579,11 +579,117 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![1])
 );
 
+// Cast tests
 check_custom_start!(
-    test_char_to_u32,
-    input = "char_test.rs",
+    test_cast_char_to_u32,
+    input = "cast.rs",
     start_fn = "char_to_u32",
-    result = TestResult::ErrorRegex(r".*Unsupported cast kind: IntToInt.*".to_string())
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_u32_to_char,
+    input = "cast.rs",
+    start_fn = "u32_to_char_cast",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_char_to_u8,
+    input = "cast.rs",
+    start_fn = "char_to_u8",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_u8_to_char,
+    input = "cast.rs",
+    start_fn = "u8_to_char",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_unicode_char_to_u8,
+    input = "cast.rs",
+    start_fn = "unicode_char_to_u8",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_u32_to_i32,
+    input = "cast.rs",
+    start_fn = "u32_to_i32",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_i32_to_u32,
+    input = "cast.rs",
+    start_fn = "i32_to_u32",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_u8_to_u32,
+    input = "cast.rs",
+    start_fn = "u8_to_u32",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_i8_to_i32,
+    input = "cast.rs",
+    start_fn = "i8_to_i32",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_i8_to_u32,
+    input = "cast.rs",
+    start_fn = "i8_to_u32",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_u32_to_u8,
+    input = "cast.rs",
+    start_fn = "u32_to_u8",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_i32_to_i8,
+    input = "cast.rs",
+    start_fn = "i32_to_i8",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_neg_i32_to_i8,
+    input = "cast.rs",
+    start_fn = "neg_i32_to_i8",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_u64_to_u16,
+    input = "cast.rs",
+    start_fn = "u64_to_u16",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_i16_to_i64,
+    input = "cast.rs",
+    start_fn = "i16_to_i64",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_cast_i32_1000_to_u8,
+    input = "cast.rs",
+    start_fn = "i32_1000_to_u8",
+    result = TestResult::SuccessWithValue(vec![1])
 );
 
 check_custom_start!(
@@ -591,6 +697,13 @@ check_custom_start!(
     input = "char_test.rs",
     start_fn = "u32_to_char",
     result = TestResult::ErrorRegex(r".*Unsupported.*enum.*aggregation.*".to_string())
+);
+
+check_custom_start!(
+    test_invalid_char_from_u32,
+    input = "char_test.rs",
+    start_fn = "invalid_char_from_u32",
+    result = TestResult::ErrorRegex(r".*Unsupported rvalue: Discriminant.*".to_string())
 );
 
 check_custom_start!(

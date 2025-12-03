@@ -15,14 +15,14 @@ pub fn compare_chars() -> bool {
     'x' == 'x'
 }
 
-// Char to u32
-pub fn char_to_u32() -> u32 {
-    'A' as u32
-}
-
 // Char from u32
 pub fn u32_to_char() -> char {
     char::from_u32(65).unwrap()
+}
+
+// Invalid char from u32 - None case
+pub fn invalid_char_from_u32() -> char {
+    char::from_u32(0x110000).unwrap()
 }
 
 // Char is alphabetic

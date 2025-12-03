@@ -164,6 +164,11 @@ impl Value {
         &self.data
     }
 
+    /// Get mutable access to the raw bytes of the value
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
     /// Create unit value (zero-sized)
     pub fn unit() -> &'static Self {
         static UNIT: Value = Value {

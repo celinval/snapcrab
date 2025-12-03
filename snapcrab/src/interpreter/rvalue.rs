@@ -296,6 +296,42 @@ impl<'a> FnInterpreter<'a> {
         target_ty: Ty,
     ) -> Result<Value> {
         match cast_kind {
+            CastKind::IntToInt => {
+                let target_size = target_ty.size()?;
+                let source_size = source_ty.size()?;
+
+                if target_size == source_size {
+                    Ok(value)
+                } else if target_size > source_size {
+                    // Check if source is signed for sign extension
+                    let is_signed = matches!(source_ty.kind().rigid(), Some(RigidTy::Int(_)));
+
+                    if is_signed {
+                        // Sign extend: check if high bit is set
+                        let high_byte = value.as_bytes()[source_size - 1];
+                        let is_negative = (high_byte & 0x80) != 0;
+
+                        if is_negative {
+                            // Sign extend with 0xFF bytes
+                            let mut result = Value::with_size(target_size);
+                            result.as_bytes_mut()[..source_size].copy_from_slice(value.as_bytes());
+                            for i in source_size..target_size {
+                                result.as_bytes_mut()[i] = 0xFF;
+                            }
+                            Ok(result)
+                        } else {
+                            // Zero extend
+                            Ok(Value::from_val_with_padding(&value, target_size))
+                        }
+                    } else {
+                        // Zero extend for unsigned
+                        Ok(Value::from_val_with_padding(&value, target_size))
+                    }
+                } else {
+                    // Truncate to target size
+                    Ok(value.as_bytes()[..target_size].into())
+                }
+            }
             CastKind::PtrToPtr => {
                 if target_ty.is_wide_ptr() {
                     bail!("Expected cast to thin pointer, but found: `{target_ty}")
