@@ -43,9 +43,7 @@ impl<'a> function::FnInterpreter<'a> {
 
                         // Read the pointer value at current_addr using memory tracker
                         let ptr_value = self.memory.read_addr(current_addr, current_ty)?;
-                        let address = ptr_value
-                            .as_type::<usize>()
-                            .context("Expected usize pointer value")?;
+                        let address = ptr_value.to_data_addr()?.as_type::<usize>().unwrap();
 
                         Ok((address, pointee_ty))
                     }
@@ -76,7 +74,8 @@ impl<'a> function::FnInterpreter<'a> {
 
                         // Get array element type and stride
                         let (element_ty, stride) = match current_ty.kind() {
-                            TyKind::RigidTy(RigidTy::Array(elem_ty, _)) => {
+                            TyKind::RigidTy(RigidTy::Array(elem_ty, _))
+                            | TyKind::RigidTy(RigidTy::Slice(elem_ty)) => {
                                 let layout = current_ty.layout()?;
                                 let stride = match layout.shape().fields {
                                     rustc_public::abi::FieldsShape::Array { stride, .. } => {

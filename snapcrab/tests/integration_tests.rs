@@ -526,3 +526,41 @@ check_custom_start!(
         50, 0, 0, 0
     ])
 );
+
+// Slice tests - fat pointer support implemented, indexing needs fat pointer deref
+check_custom_start!(
+    test_read_slice_element,
+    input = "slice_test.rs",
+    start_fn = "read_slice_element",
+    result = TestResult::SuccessWithValue(vec![30, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_get_slice_len,
+    input = "slice_test.rs",
+    start_fn = "get_slice_len",
+    result = TestResult::SuccessWithValue(vec![3, 0, 0, 0, 0, 0, 0, 0])
+);
+
+// Str tests - fat pointer support implemented
+check_custom_start!(
+    test_get_str_len,
+    input = "str_test.rs",
+    start_fn = "get_str_len",
+    result = TestResult::SuccessWithValue(vec![5, 0, 0, 0, 0, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_read_str_byte,
+    input = "str_test.rs",
+    start_fn = "read_str_byte",
+    result = TestResult::ErrorRegex(r".*Wide pointers not supported.*".to_string())
+);
+
+// Unsized coercion tests
+check_custom_start!(
+    test_struct_array_to_slice,
+    input = "unsized_coercion.rs",
+    start_fn = "struct_array_to_slice",
+    result = TestResult::ErrorRegex(r".*Unsupported coercion.*Container.*".to_string())
+);

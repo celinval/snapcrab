@@ -1,8 +1,20 @@
+//! Abstraction of a value in memory
+//!
+//! Values are always initialized to avoid reading from uninitialized memory
+//! in case the program being interpreted has a safety violation.
+//!
+//! The value will include padding bytes.
+//!
+//! # Warning
+//!
+//! This module currently assumes the target machine is a little endian and
+//! matches number of bits from host machine.
 use crate::ty::MonoType;
 use anyhow::{Result, bail};
 use rustc_public::abi::FieldsShape;
 use rustc_public::ty::{RigidTy, Ty, TyKind};
 use smallvec::{SmallVec, smallvec};
+use std::ops::{Index, Range};
 use zerocopy::{FromBytes, IntoBytes};
 
 /// Index type for local variables in a function's stack frame.
@@ -38,9 +50,7 @@ impl TypedValue<'_> {
                     let field_size = field_ty.size()?;
                     let offset = field_offset.bytes();
                     if offset + field_size <= self.value.len() {
-                        let field_data =
-                            SmallVec::from_slice(&self.value[offset..offset + field_size]);
-                        return Ok(Value { data: field_data });
+                        return Ok(self.value[offset..offset + field_size].into());
                     }
                 }
                 bail!("Field at `{field_idx}` of `{field_ty}` out of range.")
@@ -75,8 +85,11 @@ impl std::fmt::Display for TypedValue<'_> {
                     IntTy::I8 => write!(f, "{}", i8::read_from_bytes(self.value).unwrap()),
                     IntTy::I16 => write!(f, "{}", i16::read_from_bytes(self.value).unwrap()),
                     IntTy::I32 => write!(f, "{}", i32::read_from_bytes(self.value).unwrap()),
-                    IntTy::I64 | IntTy::Isize => {
+                    IntTy::I64 => {
                         write!(f, "{}", i64::read_from_bytes(self.value).unwrap())
+                    }
+                    IntTy::Isize => {
+                        write!(f, "{}", isize::read_from_bytes(self.value).unwrap())
                     }
                     IntTy::I128 => write!(f, "{}", i128::read_from_bytes(self.value).unwrap()),
                 }
@@ -87,8 +100,11 @@ impl std::fmt::Display for TypedValue<'_> {
                     UintTy::U8 => write!(f, "{}", u8::read_from_bytes(self.value).unwrap()),
                     UintTy::U16 => write!(f, "{}", u16::read_from_bytes(self.value).unwrap()),
                     UintTy::U32 => write!(f, "{}", u32::read_from_bytes(self.value).unwrap()),
-                    UintTy::U64 | UintTy::Usize => {
+                    UintTy::U64 => {
                         write!(f, "{}", u64::read_from_bytes(self.value).unwrap())
+                    }
+                    UintTy::Usize => {
+                        write!(f, "{}", usize::read_from_bytes(self.value).unwrap())
                     }
                     UintTy::U128 => write!(f, "{}", u128::read_from_bytes(self.value).unwrap()),
                 }
@@ -221,10 +237,10 @@ impl Value {
     }
 
     /// Create value from raw bytes with additional padding at the end
-    pub fn from_val_with_padding(src: Value, len: usize) -> Self {
+    pub fn from_val_with_padding(src: &Value, len: usize) -> Self {
         if src.len() == len {
             // simply move
-            src
+            src.clone()
         } else if src.len() == 0 {
             // Only padding bytes needed
             Self::with_size(len)
@@ -258,6 +274,47 @@ impl Value {
         }
     }
 
+    /// Method for creating fat pointers
+    ///
+    /// Metadata can be either pointer to vtable or length of a slice.
+    pub fn new_wide_ptr(data_addr: usize, metadata: usize) -> Self {
+        Self::from_type([data_addr, metadata])
+    }
+
+    /// Get metadata from a possibly wide pointer
+    ///
+    /// - Wide pointers are represented as [data_addr: usize, metadata: usize]
+    /// - Thin pointers are represented as [address: usize]
+    pub fn ptr_metadata(&self) -> Result<Self> {
+        let ptr_size = size_of::<usize>();
+        if self.len() == ptr_size {
+            // Thin pointer, return an empty value.
+            Ok(Value::unit().clone())
+        } else if self.len() == 2 * ptr_size {
+            Ok(self.data[ptr_size..2 * ptr_size].into())
+        } else {
+            bail!("Expected pointer, got {} bytes", self.len())
+        }
+    }
+
+    /// Get thin pointer from a possibly wide pointer
+    ///
+    /// - Wide pointers are represented as [data_address: usize, metadata: usize]
+    /// - Thin pointers are represented as [address: usize]
+    #[allow(clippy::wrong_self_convention)]
+    pub fn to_data_addr(mut self) -> Result<Self> {
+        let ptr_size = size_of::<usize>();
+        if self.len() == ptr_size {
+            // Already thin pointer
+            Ok(self)
+        } else if self.len() == 2 * ptr_size {
+            self.data.truncate(ptr_size);
+            Ok(self)
+        } else {
+            bail!("Expected pointer, got {} bytes", self.len())
+        }
+    }
+
     /// Try to interpret as boolean
     pub fn as_bool(&self) -> Option<bool> {
         if self.data.len() == 1 {
@@ -265,6 +322,28 @@ impl Value {
         } else {
             None
         }
+    }
+}
+
+impl From<&[u8]> for Value {
+    fn from(bytes: &[u8]) -> Self {
+        Self::from_bytes(bytes)
+    }
+}
+
+impl Index<usize> for Value {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index]
+    }
+}
+
+impl Index<Range<usize>> for Value {
+    type Output = [u8];
+
+    fn index(&self, range: Range<usize>) -> &Self::Output {
+        &self.data[range]
     }
 }
 
@@ -477,7 +556,7 @@ mod tests {
     #[test]
     fn test_from_val_with_padding_same_size() {
         let src = Value::from_type(42i32);
-        let result = Value::from_val_with_padding(src.clone(), 4);
+        let result = Value::from_val_with_padding(&src, 4);
         assert_eq!(result.as_bytes(), &[42, 0, 0, 0]);
         assert_eq!(result.len(), 4);
     }
@@ -485,7 +564,7 @@ mod tests {
     #[test]
     fn test_from_val_with_padding_add_padding() {
         let src = Value::from_type(42i32);
-        let result = Value::from_val_with_padding(src, 8);
+        let result = Value::from_val_with_padding(&src, 8);
         assert_eq!(result.as_bytes(), &[42, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(result.len(), 8);
     }
@@ -493,7 +572,7 @@ mod tests {
     #[test]
     fn test_from_val_with_padding_empty_src() {
         let src = Value::with_size(0);
-        let result = Value::from_val_with_padding(src, 4);
+        let result = Value::from_val_with_padding(&src, 4);
         assert_eq!(result.as_bytes(), &[0u8, 0, 0, 0]);
         assert_eq!(result.len(), 4);
     }
@@ -501,7 +580,7 @@ mod tests {
     #[test]
     fn test_from_val_with_padding_empty_to_empty() {
         let src = Value::with_size(0);
-        let result = Value::from_val_with_padding(src, 0);
+        let result = Value::from_val_with_padding(&src, 0);
         assert_eq!(result.as_bytes(), &[] as &[u8]);
         assert_eq!(result.len(), 0);
     }
@@ -509,7 +588,7 @@ mod tests {
     #[test]
     fn test_from_val_with_padding_one_byte() {
         let src = Value::from_type(255u8);
-        let result = Value::from_val_with_padding(src, 4);
+        let result = Value::from_val_with_padding(&src, 4);
         assert_eq!(result.as_bytes(), &[255, 0, 0, 0]);
         assert_eq!(result.len(), 4);
     }
@@ -518,6 +597,54 @@ mod tests {
     #[should_panic(expected = "Expected at least")]
     fn test_from_val_with_padding_src_too_large() {
         let src = Value::from_type(42i32);
-        let _ = Value::from_val_with_padding(src, 2);
+        let _ = Value::from_val_with_padding(&src, 2);
+    }
+
+    #[test]
+    fn test_new_wide_ptr() {
+        let ptr = Value::new_wide_ptr(0x1000, 42);
+        assert_eq!(ptr.len(), 2 * size_of::<usize>());
+        assert_eq!(ptr.as_type::<[usize; 2]>(), Some([0x1000, 42]));
+    }
+
+    #[test]
+    fn test_ptr_metadata_thin_pointer() {
+        let thin_ptr = Value::from_type(0x1000usize);
+        let metadata = thin_ptr.ptr_metadata().unwrap();
+        assert!(metadata.is_unit());
+    }
+
+    #[test]
+    fn test_ptr_metadata_wide_pointer() {
+        let wide_ptr = Value::new_wide_ptr(0x1000, 42);
+        let metadata = wide_ptr.ptr_metadata().unwrap();
+        assert_eq!(metadata.as_type::<usize>(), Some(42));
+    }
+
+    #[test]
+    fn test_ptr_metadata_invalid_size() {
+        let invalid = Value::from_type(42u32);
+        assert!(invalid.ptr_metadata().is_err());
+    }
+
+    #[test]
+    fn test_to_data_addr_thin_pointer() {
+        let thin_ptr = Value::from_type(0x1000usize);
+        let data_addr = thin_ptr.to_data_addr().unwrap();
+        assert_eq!(data_addr.as_type::<usize>(), Some(0x1000));
+    }
+
+    #[test]
+    fn test_to_data_addr_wide_pointer() {
+        let wide_ptr = Value::new_wide_ptr(0x2000, 100);
+        let data_addr = wide_ptr.to_data_addr().unwrap();
+        assert_eq!(data_addr.len(), size_of::<usize>());
+        assert_eq!(data_addr.as_type::<usize>(), Some(0x2000));
+    }
+
+    #[test]
+    fn test_to_data_addr_invalid_size() {
+        let invalid = Value::from_type(42u32);
+        assert!(invalid.to_data_addr().is_err());
     }
 }

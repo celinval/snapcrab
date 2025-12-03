@@ -2,8 +2,10 @@ use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
-use rustc_public::mir::{AggregateKind, BinOp, CastKind, NullOp, Operand, Rvalue, UnOp};
-use rustc_public::ty::{IntTy, RigidTy, Ty, UintTy};
+use rustc_public::mir::{
+    AggregateKind, BinOp, CastKind, NullOp, Operand, PointerCoercion, Rvalue, UnOp,
+};
+use rustc_public::ty::{IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::function::FnInterpreter;
@@ -74,21 +76,27 @@ impl BinaryEval for BinOp {
 
 impl UnaryEval for UnOp {
     fn eval(&self, operand: &Value, result_type: RigidTy) -> Result<Value> {
-        match result_type {
-            RigidTy::Int(int_ty) => match int_ty {
-                IntTy::I8 => eval_int_unop::<i8>(*self, operand),
-                IntTy::I16 => eval_int_unop::<i16>(*self, operand),
-                IntTy::I32 => eval_int_unop::<i32>(*self, operand),
-                IntTy::I64 => eval_int_unop::<i64>(*self, operand),
-                IntTy::I128 => eval_int_unop::<i128>(*self, operand),
-                IntTy::Isize => eval_int_unop::<isize>(*self, operand),
+        match self {
+            UnOp::Not | UnOp::Neg => match result_type {
+                RigidTy::Int(int_ty) => match int_ty {
+                    IntTy::I8 => eval_int_unop::<i8>(*self, operand),
+                    IntTy::I16 => eval_int_unop::<i16>(*self, operand),
+                    IntTy::I32 => eval_int_unop::<i32>(*self, operand),
+                    IntTy::I64 => eval_int_unop::<i64>(*self, operand),
+                    IntTy::I128 => eval_int_unop::<i128>(*self, operand),
+                    IntTy::Isize => eval_int_unop::<isize>(*self, operand),
+                },
+                RigidTy::Bool => eval_bool_unop(*self, operand),
+                RigidTy::Uint(_) => bail!("Unary operations on unsigned integers not supported"),
+                _ => bail!(
+                    "Unsupported operation `{self:?}` on `{}` type",
+                    Ty::from_rigid_kind(result_type)
+                ),
             },
-            RigidTy::Bool => eval_bool_unop(*self, operand),
-            RigidTy::Uint(_) => bail!("Unary operations on unsigned integers not supported"),
-            _ => bail!(
-                "Unsupported operation `{self:?}` on `{}` type",
-                Ty::from_rigid_kind(result_type)
-            ),
+            UnOp::PtrMetadata => {
+                // Extract metadata from wide pointer
+                operand.ptr_metadata()
+            }
         }
     }
 }
@@ -221,7 +229,8 @@ impl<'a> FnInterpreter<'a> {
             }
             Rvalue::Cast(cast_kind, operand, target_ty) => {
                 let value = self.evaluate_operand(operand)?;
-                self.perform_cast(cast_kind, value, target_ty)
+                let source_ty = operand.ty(self.locals())?;
+                self.perform_cast(cast_kind, value, source_ty, *target_ty)
             }
             Rvalue::Aggregate(kind, operands) => self.eval_aggregate(rvalue, kind, operands),
             Rvalue::Repeat(operand, count) => {
@@ -252,7 +261,7 @@ impl<'a> FnInterpreter<'a> {
                 debug_assert_eq!(operands.len(), 1);
                 let value = self.evaluate_operand(&operands[0])?;
                 let ty = rvalue.ty(self.locals())?;
-                Ok(Value::from_val_with_padding(value, ty.size()?))
+                Ok(Value::from_val_with_padding(&value, ty.size()?))
             }
             AggregateKind::Adt(def, _, _, _, _) if def.kind().is_enum() => {
                 // Need to implement set discriminant
@@ -282,18 +291,64 @@ impl<'a> FnInterpreter<'a> {
         &self,
         cast_kind: &rustc_public::mir::CastKind,
         value: Value,
-        target_ty: &Ty,
+        source_ty: Ty,
+        target_ty: Ty,
     ) -> Result<Value> {
         match cast_kind {
             CastKind::PtrToPtr => {
-                if !target_ty.is_thin_ptr() {
-                    bail!("Wide pointers not supported");
+                if target_ty.is_wide_ptr() {
+                    bail!("Expected cast to thin pointer, but found: `{target_ty}")
+                } else if source_ty.is_wide_ptr() {
+                    value.to_data_addr()
+                } else {
+                    Ok(value)
                 }
-                Ok(value)
+            }
+            CastKind::PointerCoercion(PointerCoercion::Unsize) => {
+                perform_unsized_coercion(value, source_ty, target_ty)
             }
             CastKind::Transmute => Ok(value),
             _ => bail!("Unsupported cast kind: {:?}", cast_kind),
         }
+    }
+}
+
+/// Perform unsized coercion of a pointer/reference value, e.g., `&[T; n]` to `&[T]`.
+///
+/// Note the source could be a thin or wide pointer, while the target type is
+/// always a wide pointer.
+///
+/// This includes converting:
+///   - Thin pointers to wide pointers. E.g.: Array to slice, object to dyn trait.
+///   - Structs containing thin pointers to structs containing wide pointers
+///   - Conversion between wide pointers.
+///       - E.g.: `&(dyn Any + Send)` to `&dyn Any`.
+fn perform_unsized_coercion(value: Value, src_ptr_ty: Ty, dst_ptr_ty: Ty) -> Result<Value> {
+    let src_pointee_kind = src_ptr_ty
+        .kind()
+        .builtin_deref(true)
+        .map(|TypeAndMut { ty, .. }| ty.kind())
+        .context("Expected pointer coercion, found source `{src_ptr_ty}`")?;
+    let dst_pointee_kind = dst_ptr_ty
+        .kind()
+        .builtin_deref(true)
+        .map(|TypeAndMut { ty, .. }| ty.kind())
+        .context("Expected pointer coercion, found target `{src_ptr_ty}`")?;
+
+    if src_pointee_kind == dst_pointee_kind {
+        // In case of redundant cast
+        Ok(value)
+    } else if dst_pointee_kind.is_slice() {
+        // [T; N] -> &[T]
+        let data_ptr = value.as_type::<usize>().context("Expected pointer value")?;
+        let TyKind::RigidTy(RigidTy::Array(_, len_const)) = src_pointee_kind else {
+            bail!("Expected array for coercion to slice, but found {dst_ptr_ty}")
+        };
+        let len = len_const.eval_target_usize()? as usize;
+
+        Ok(Value::new_wide_ptr(data_ptr, len))
+    } else {
+        bail!("Unsupported coercion {src_ptr_ty} -> {dst_ptr_ty}")
     }
 }
 
