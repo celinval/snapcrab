@@ -557,6 +557,63 @@ check_custom_start!(
     result = TestResult::ErrorRegex(r".*Wide pointers not supported.*".to_string())
 );
 
+// Char tests
+check_custom_start!(
+    test_get_char_a,
+    input = "char_test.rs",
+    start_fn = "get_char_a",
+    result = TestResult::SuccessWithValue(vec![97, 0, 0, 0])
+);
+
+check_custom_start!(
+    test_get_unicode_char,
+    input = "char_test.rs",
+    start_fn = "get_unicode_char",
+    result = TestResult::SuccessWithValue(vec![128, 249, 1, 0])
+);
+
+check_custom_start!(
+    test_compare_chars,
+    input = "char_test.rs",
+    start_fn = "compare_chars",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_char_to_u32,
+    input = "char_test.rs",
+    start_fn = "char_to_u32",
+    result = TestResult::ErrorRegex(r".*Unsupported cast kind: IntToInt.*".to_string())
+);
+
+check_custom_start!(
+    test_u32_to_char,
+    input = "char_test.rs",
+    start_fn = "u32_to_char",
+    result = TestResult::ErrorRegex(r".*Unsupported.*enum.*aggregation.*".to_string())
+);
+
+check_custom_start!(
+    test_is_alphabetic,
+    input = "char_test.rs",
+    start_fn = "is_alphabetic",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_is_numeric,
+    input = "char_test.rs",
+    start_fn = "is_numeric",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
+check_custom_start!(
+    test_is_whitespace,
+    input = "char_test.rs",
+    start_fn = "is_whitespace",
+    result = TestResult::SuccessWithValue(vec![1])
+);
+
 // Unsized coercion tests
 check_custom_start!(
     test_struct_array_to_slice,

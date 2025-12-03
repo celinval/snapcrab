@@ -59,6 +59,7 @@ impl BinaryEval for BinOp {
                 UintTy::Usize => eval_int_binop::<usize>(*self, left, right),
             },
             RigidTy::Bool => eval_bool_binop(*self, left, right),
+            RigidTy::Char => eval_int_binop::<u32>(*self, left, right),
             RigidTy::RawPtr(_, _) | RigidTy::Ref(_, _, _) => {
                 let ty = Ty::from_rigid_kind(operand_type);
                 if !ty.is_thin_ptr() {
