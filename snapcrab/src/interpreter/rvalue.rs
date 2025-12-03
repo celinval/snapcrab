@@ -307,22 +307,7 @@ impl<'a> FnInterpreter<'a> {
                     let is_signed = matches!(source_ty.kind().rigid(), Some(RigidTy::Int(_)));
 
                     if is_signed {
-                        // Sign extend: check if high bit is set
-                        let high_byte = value.as_bytes()[source_size - 1];
-                        let is_negative = (high_byte & 0x80) != 0;
-
-                        if is_negative {
-                            // Sign extend with 0xFF bytes
-                            let mut result = Value::with_size(target_size);
-                            result.as_bytes_mut()[..source_size].copy_from_slice(value.as_bytes());
-                            for i in source_size..target_size {
-                                result.as_bytes_mut()[i] = 0xFF;
-                            }
-                            Ok(result)
-                        } else {
-                            // Zero extend
-                            Ok(Value::from_val_with_padding(&value, target_size))
-                        }
+                        Ok(value.sign_extend(target_size))
                     } else {
                         // Zero extend for unsigned
                         Ok(Value::from_val_with_padding(&value, target_size))

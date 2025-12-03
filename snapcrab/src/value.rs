@@ -164,11 +164,6 @@ impl Value {
         &self.data
     }
 
-    /// Get mutable access to the raw bytes of the value
-    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
-        &mut self.data
-    }
-
     /// Create unit value (zero-sized)
     pub fn unit() -> &'static Self {
         static UNIT: Value = Value {
@@ -260,6 +255,28 @@ impl Value {
             new_val.data[0..src.len()].copy_from_slice(&src.data);
             new_val
         }
+    }
+
+    /// Sign-extend value to target size
+    ///
+    /// Extends with 0xFF bytes if the high bit is set, otherwise zero-extends.
+    pub fn sign_extend(self, target_size: usize) -> Self {
+        if self.len() >= target_size {
+            return self;
+        }
+
+        let is_negative = self.len() > 0 && (self.data[self.len() - 1] & 0x80) != 0;
+
+        let mut result = if is_negative {
+            Self {
+                data: smallvec![0xFF; target_size],
+            }
+        } else {
+            Self::with_size(target_size)
+        };
+
+        result.data[..self.len()].copy_from_slice(&self.data);
+        result
     }
 
     /// Generic method to interpret as any FromBytes type
