@@ -131,7 +131,7 @@ check_custom_start!(
     test_reference_to_reference,
     input = "reference_test.rs",
     start_fn = "test_ref_to_ref",
-    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CopyForDeref.*".to_string())
+    result = TestResult::SuccessWithValue(vec![25, 0, 0, 0])
 );
 
 check_custom_start!(
@@ -160,7 +160,7 @@ check_custom_start!(
     test_double_deref,
     input = "reference_test.rs",
     start_fn = "test_double_deref",
-    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CopyForDeref.*".to_string())
+    result = TestResult::SuccessWithValue(vec![99, 0, 0, 0])
 );
 
 check_custom_start!(

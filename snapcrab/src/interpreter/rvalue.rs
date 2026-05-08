@@ -3,7 +3,7 @@ use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
 use rustc_public::mir::{
-    AggregateKind, BinOp, CastKind, NullOp, Operand, PointerCoercion, Rvalue, UnOp,
+    AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp,
 };
 use rustc_public::ty::{IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -239,11 +239,6 @@ impl<'a> FnInterpreter<'a> {
                 let count_val = count.eval_target_usize()? as usize;
                 Ok(Value::from_repeated(&value, count_val))
             }
-            Rvalue::NullaryOp(op, ty) => match op {
-                NullOp::AlignOf => Ok(Value::from_type(ty.alignment()?)),
-                NullOp::SizeOf => Ok(Value::from_type(ty.size()?)),
-                _ => bail!("Unsupported nullary op: {:?}", op),
-            },
             _ => {
                 bail!("Unsupported rvalue: {:?}", rvalue);
             }

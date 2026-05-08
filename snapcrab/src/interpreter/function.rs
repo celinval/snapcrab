@@ -345,6 +345,8 @@ impl FnInterpreter<'_> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => self.read_from_place(place),
             Operand::Constant(const_op) => self.evaluate_constant(&const_op.const_),
+            // TODO: Get the value from rustc_public when a function is available
+            Operand::RuntimeChecks(_) => Ok(Value::from_bool(true)),
         }
     }
 

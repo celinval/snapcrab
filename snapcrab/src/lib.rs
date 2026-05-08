@@ -53,7 +53,7 @@ pub fn run_function(fn_name: &str) -> Result<Vec<u8>> {
     let fn_def = crate_def
         .fn_defs()
         .into_iter()
-        .find(|def| def.name() == fn_name)
+        .find(|def| def.name().ends_with(fn_name))
         .with_context(|| format!("Function '{}' not found", fn_name))?;
 
     info!("Found function: {}", fn_def.name());
