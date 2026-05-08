@@ -37,6 +37,14 @@ Key responsibilities:
 
 This approach will allow SnapCrab to leverage the existing Rust ecosystem while providing fast execution for the code under development.
 
+## Platform Constraints
+
+SnapCrab requires a little-endian host machine and enforces that the interpreted code's target
+matches the host (same endianness and pointer width).
+This is because the interpreter stores values in host-native byte order and uses host-sized pointers
+for memory operations.
+Cross-target interpretation (e.g., interpreting 32-bit code on a 64-bit host) is not supported.
+
 ## Memory Tracking and Safety
 
 The main goal of the interpreter architecture is speed.

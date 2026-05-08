@@ -6,12 +6,16 @@
 
 #![feature(rustc_private)]
 
+#[cfg(not(target_endian = "little"))]
+compile_error!("snapcrab only supports little-endian host machines");
+
 extern crate rustc_driver;
 extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
 use clap::Parser;
+use rustc_public::target::{Endian, MachineInfo, MachineSize};
 use rustc_public::{CompilerError, run};
 use std::ops::ControlFlow;
 use std::process::ExitCode;
@@ -75,6 +79,18 @@ fn main() -> ExitCode {
 /// # Returns
 /// * `ControlFlow::Break(())` - Always breaks to exit the compiler callback
 fn start_interpreter(start_fn: Option<String>) -> ControlFlow<()> {
+    let target = MachineInfo::target();
+    let host = MachineInfo {
+        endian: Endian::Little,
+        pointer_width: MachineSize::from_bits(usize::BITS as usize),
+    };
+    if target != host {
+        eprintln!(
+            "error: snapcrab does not support interpreting code for a different target than the host machine"
+        );
+        return ControlFlow::Break(());
+    }
+
     let crate_name = rustc_public::local_crate().name;
     info!("Interpreting crate: {}", crate_name);
 

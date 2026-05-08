@@ -3,6 +3,11 @@ Experimental Rust interpreter
 
 An experimental Rust interpreter designed to speed up local development by executing Rust code without compilation and linking overhead.
 
+## Requirements
+
+- **Little-endian host machine** (e.g., x86-64, AArch64). SnapCrab cannot be built on big-endian hosts.
+- **Matching target**: The interpreted code must target the same machine as the host. Cross-interpretation (e.g., interpreting 32-bit code on a 64-bit host) is not supported.
+
 ## Goals
 
 - Enable rapid testing and development iteration

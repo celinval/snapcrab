@@ -32,12 +32,17 @@ Execute a specific function by name (requires fully qualified name):
 snapcrab --start-fn <function_name> <file.rs>
 ```
 
+## Requirements
+
+- A **little-endian** host machine (e.g., x86-64, AArch64). SnapCrab will not compile on big-endian hosts.
+- The interpreted code must target the **same machine** as the host (same endianness and pointer width). Cross-interpretation is not supported.
+
 ## Limitations
 
 Current limitations in the early development phase:
 - Limited subset of Rust syntax supported
 - Small binary programs only / no cargo support yet
 - Basic language constructs
-- Linux x86-64 target only
+- Little-endian host only; no cross-target interpretation
 
 Future expansion will include external dependencies and broader Rust feature support.
