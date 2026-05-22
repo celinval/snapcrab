@@ -15,6 +15,7 @@ A lot of the coverage we will add as we try more complex examples.
 - Crate loading
 - FFI support
 - Standard library
+- Improve diagnostics (annotate_snippets?)
 
 
 ## RustC Public
