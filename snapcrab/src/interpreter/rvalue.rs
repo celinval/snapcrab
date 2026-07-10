@@ -348,7 +348,14 @@ impl<'a> FnInterpreter<'a> {
             CastKind::PointerCoercion(PointerCoercion::Unsize) => {
                 perform_unsized_coercion(value, source_ty, target_ty)
             }
-            CastKind::Transmute => Ok(value),
+            CastKind::Transmute => {
+                // Skip pointer validation: string literals currently store
+                // null data pointers due to incomplete static memory support.
+                if !target_ty.kind().is_any_ptr() {
+                    super::check::validate_value(&value, target_ty, &self.memory.check_config)?;
+                }
+                Ok(value)
+            }
             _ => bail!("Unsupported cast kind: {:?}", cast_kind),
         }
     }
