@@ -2,7 +2,10 @@
 
 #[macro_use]
 mod common;
-mod enum_tests;
+
+mod integration_tests {
+    mod enum_tests;
+}
 
 use common::TestResult;
 

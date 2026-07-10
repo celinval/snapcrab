@@ -105,15 +105,17 @@ macro_rules! check_interpreter {
 
 #[macro_export]
 macro_rules! check_custom_start {
-    ($test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr $(,)?) => {
+    ($(#[$attr:meta])* $test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr $(,)?) => {
         check_custom_start!(
+            $(#[$attr])*
             $test_name,
             input = $input_file,
             start_fn = $start_fn,
             result = crate::common::TestResult::Success
         );
     };
-    ($test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr, result=$expected:expr $(,)?) => {
+    ($(#[$attr:meta])* $test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr, result=$expected:expr $(,)?) => {
+        $(#[$attr])*
         #[test]
         fn $test_name() {
             let input_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
