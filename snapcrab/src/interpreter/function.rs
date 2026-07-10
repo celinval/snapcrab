@@ -29,30 +29,52 @@ pub struct FnInterpreter<'a> {
 
 /// Run the interpreter for the given instance.
 ///
-/// # Arguments
-/// * `instance` - The instance to interpret
-/// * `memory` - The memory context for execution
-/// * `args` - Arguments to pass to the function
-///
-/// # Returns
-/// * `Ok(Value)` - The return value of the function
-/// * `Err(anyhow::Error)` - If execution fails
+/// Uses a three-tier dispatch:
+/// 1. If the function has a MIR body, interpret it
+/// 2. If it's an intrinsic without a body, shim it
+/// 3. Otherwise, call the native compiled version via symbol resolution
 pub fn invoke_fn(
     instance: Instance,
     memory: &mut ThreadMemory,
     args: Vec<Value>,
     unwinding: &mut Option<u16>,
 ) -> Result<Value> {
-    memory.with_stack_frame(instance, |body, memory| {
-        let interpreter = FnInterpreter {
-            memory,
-            current_block: 0,
-            instance,
-            body,
-            unwinding,
-        };
-        interpreter.execute(args)
-    })
+    // Tier 1: interpret MIR body if available
+    if instance.has_body() {
+        return memory.with_stack_frame(instance, |body, memory| {
+            let interpreter = FnInterpreter {
+                memory,
+                current_block: 0,
+                instance,
+                body,
+                unwinding,
+            };
+            interpreter.execute(args)
+        });
+    }
+
+    // Tier 2: intrinsic shims
+    if let Some(intrinsic) = instance.intrinsic_name() {
+        return super::intrinsics::eval_intrinsic(intrinsic.as_str(), &args, instance);
+    }
+
+    // Tier 3: native call via dlsym
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::native::call_native(instance, &args)
+    }));
+    match result {
+        Ok(val) => val,
+        Err(panic) => {
+            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "native function panicked".to_string()
+            };
+            bail!("Native call to `{}` panicked: {msg}", instance.name())
+        }
+    }
 }
 
 impl FnInterpreter<'_> {

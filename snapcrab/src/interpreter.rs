@@ -5,5 +5,7 @@
 //! control flow, and memory operations without code generation overhead.
 
 pub mod function;
+mod intrinsics;
+mod native;
 mod place;
 mod rvalue;
