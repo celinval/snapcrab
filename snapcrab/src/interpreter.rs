@@ -4,6 +4,7 @@
 //! The interpreter evaluates MIR instructions directly, handling function calls,
 //! control flow, and memory operations without code generation overhead.
 
+pub mod check;
 pub mod function;
 mod intrinsics;
 mod native;

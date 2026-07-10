@@ -21,6 +21,7 @@ mod memory;
 mod ty;
 mod value;
 
+pub use crate::interpreter::check::CheckConfig;
 use crate::interpreter::function::invoke_fn;
 use crate::memory::ThreadMemory;
 use crate::value::TypedValue;
@@ -48,7 +49,7 @@ use tracing::info;
 /// // Execute a function named "my_test"
 /// let result = run_function("my_test")?;
 /// ```
-pub fn run_function(fn_name: &str) -> Result<Vec<u8>> {
+pub fn run_function(fn_name: &str, check_config: CheckConfig) -> Result<Vec<u8>> {
     // Find function definition by name
     let crate_def = local_crate();
     let fn_def = crate_def
@@ -79,7 +80,9 @@ pub fn run_function(fn_name: &str) -> Result<Vec<u8>> {
     }
 
     // Execute function
-    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
+    let mut memory = ThreadMemory::new();
+    memory.check_config = check_config;
+    let result = invoke_fn(instance, &mut memory, vec![], &mut None)?;
 
     // Get return type from instance
     let body = instance.body().context("No body for function")?;
@@ -96,14 +99,16 @@ pub fn run_function(fn_name: &str) -> Result<Vec<u8>> {
     Ok(result.as_bytes().to_vec())
 }
 
-pub fn run_main() -> Result<ExitCode> {
+pub fn run_main(check_config: CheckConfig) -> Result<ExitCode> {
     let entry_fn = entry_fn().context("No entry function found")?;
     info!("Found entry function: {}", entry_fn.name());
 
     let instance =
         Instance::try_from(entry_fn).context("Failed to create instance from entry function")?;
 
-    let result = invoke_fn(instance, &mut ThreadMemory::new(), vec![], &mut None)?;
+    let mut memory = ThreadMemory::new();
+    memory.check_config = check_config;
+    let result = invoke_fn(instance, &mut memory, vec![], &mut None)?;
 
     // Convert the result value to an exit code
     match result {

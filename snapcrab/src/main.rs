@@ -35,6 +35,10 @@ struct Args {
     )]
     start_fn: Option<String>,
 
+    /// Skip specific UB checks (comma-separated: validity, alignment, bounds)
+    #[arg(long = "skip-check", value_delimiter = ',')]
+    skip_checks: Vec<String>,
+
     /// Input Rust file to interpret
     #[arg(help = "Path to the Rust source file to interpret")]
     input: String,
@@ -59,7 +63,11 @@ fn main() -> ExitCode {
 
     rustc_args.push(args.input);
 
-    let result = run!(&rustc_args, || start_interpreter(args.start_fn));
+    let check_config = snapcrab::CheckConfig::with_skipped(&args.skip_checks);
+    let result = run!(&rustc_args, || start_interpreter(
+        args.start_fn,
+        check_config
+    ));
 
     match result {
         Ok(_) | Err(CompilerError::Skipped | CompilerError::Interrupted(_)) => ExitCode::SUCCESS,
@@ -78,7 +86,10 @@ fn main() -> ExitCode {
 ///
 /// # Returns
 /// * `ControlFlow::Break(())` - Always breaks to exit the compiler callback
-fn start_interpreter(start_fn: Option<String>) -> ControlFlow<()> {
+fn start_interpreter(
+    start_fn: Option<String>,
+    check_config: snapcrab::CheckConfig,
+) -> ControlFlow<()> {
     let target = MachineInfo::target();
     let host = MachineInfo {
         endian: Endian::Little,
@@ -96,9 +107,9 @@ fn start_interpreter(start_fn: Option<String>) -> ControlFlow<()> {
 
     let result = if let Some(fn_name) = start_fn {
         info!("Using custom start function: {}", fn_name);
-        snapcrab::run_function(&fn_name).map(|_| ExitCode::SUCCESS)
+        snapcrab::run_function(&fn_name, check_config).map(|_| ExitCode::SUCCESS)
     } else {
-        snapcrab::run_main()
+        snapcrab::run_main(check_config)
     };
 
     match result {

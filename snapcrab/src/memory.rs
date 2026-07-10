@@ -12,6 +12,7 @@ mod sanitizer;
 mod stack;
 mod statics;
 
+use crate::interpreter::check::CheckConfig;
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::Result;
@@ -41,6 +42,8 @@ pub struct ThreadMemory {
     heap: Heap,
     #[allow(unused)]
     statics: Statics,
+    /// Configuration for which UB checks to perform.
+    pub check_config: CheckConfig,
 }
 
 impl ThreadMemory {

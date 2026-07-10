@@ -55,12 +55,18 @@ pub fn invoke_fn(
 
     // Tier 2: intrinsic shims
     if let Some(intrinsic) = instance.intrinsic_name() {
-        return super::intrinsics::eval_intrinsic(intrinsic.as_str(), &args, instance);
+        return super::intrinsics::eval_intrinsic(
+            intrinsic.as_str(),
+            &args,
+            instance,
+            &memory.check_config,
+        );
     }
 
     // Tier 3: native call via dlsym
+    let config = memory.check_config.clone();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::native::call_native(instance, &args)
+        super::native::call_native(instance, &args, &config)
     }));
     match result {
         Ok(val) => val,

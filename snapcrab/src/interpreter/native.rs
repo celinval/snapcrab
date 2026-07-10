@@ -7,6 +7,7 @@
 //! - The std library linked into the compiler process uses the same ABI
 //! - The same rustc produced both the MIR and the native code
 
+use crate::interpreter::check::{CheckConfig, validate_value};
 use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::abi::{PassMode, ValueAbi};
@@ -16,16 +17,19 @@ use tracing::debug;
 
 /// Call a native function by resolving its mangled symbol name.
 ///
-/// # Safety
-///
-/// This is inherently unsafe: we're calling arbitrary native code with
-/// raw byte arguments. Correctness depends on the ABI matching between
-/// what the compiler generated and what we're passing.
-pub fn call_native(instance: Instance, args: &[Value]) -> Result<Value> {
+/// Validates all argument values before the call to prevent UB from invalid
+/// values crossing the native boundary.
+pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> Result<Value> {
     let mangled = instance.mangled_name();
     debug!("Native call: {} ({})", instance.name(), mangled);
 
     let fn_abi = instance.fn_abi()?;
+
+    // Validate arguments before passing to native code
+    for (arg_abi, arg_val) in fn_abi.args.iter().zip(args.iter()) {
+        validate_value(arg_val, arg_abi.ty, config)?;
+    }
+
     let ret_size = fn_abi.ret.ty.layout()?.shape().size.bytes();
 
     // Resolve symbol from the current process via dlsym(RTLD_DEFAULT, ...)
@@ -39,9 +43,6 @@ pub fn call_native(instance: Instance, args: &[Value]) -> Result<Value> {
         ptr
     };
 
-    // Build the argument buffer: concatenate all argument bytes laid out per ABI
-    // For Rust ABI, scalar and scalar-pair args are passed directly.
-    // For aggregates passed indirectly, we pass a pointer to our memory.
     call_with_abi(fn_ptr.cast(), &fn_abi, args, ret_size)
 }
 
