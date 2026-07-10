@@ -16,6 +16,7 @@ struct HeapImpl {
     values: Vec<Value>,
 }
 
+// SAFETY: Not yet implemented — all operations return NotFound.
 unsafe impl MemorySegment for Heap {
     fn read_addr(&self, _address: usize, _size: usize) -> Result<&[u8], MemoryAccessError> {
         tracing::error!("Heap memory access not yet supported");

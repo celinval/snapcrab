@@ -57,7 +57,7 @@ if ! cargo fmt --check; then
 fi
 
 # Run cargo clippy
-if ! cargo clippy -- -D warnings; then
+if ! cargo clippy --quiet -- -D warnings; then
     echo "Error: Clippy found issues. Fix them before committing."
     exit 1
 fi

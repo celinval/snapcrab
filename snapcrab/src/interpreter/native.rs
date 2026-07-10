@@ -33,17 +33,15 @@ pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> 
     let ret_size = fn_abi.ret.ty.layout()?.shape().size.bytes();
 
     // Resolve symbol from the current process via dlsym(RTLD_DEFAULT, ...).
+    // TODO: cache resolved symbols to avoid repeated linear searches.
     let symbol_name = mangled.as_str();
+    let c_name = CString::new(symbol_name).expect("Symbol name should not contain null bytes");
     // SAFETY: dlsym with RTLD_DEFAULT searches the current process's loaded symbols.
     // The returned pointer is valid for the process lifetime (std is always loaded).
-    let fn_ptr = unsafe {
-        let c_name = CString::new(symbol_name).expect("Symbol name should not contain null bytes");
-        let ptr = libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr());
-        if ptr.is_null() {
-            bail!("Symbol `{symbol_name}` not found in current process");
-        }
-        ptr
-    };
+    let fn_ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr()) };
+    if fn_ptr.is_null() {
+        bail!("Symbol `{symbol_name}` not found in current process");
+    }
 
     call_with_abi(fn_ptr.cast(), &fn_abi, args, ret_size)
 }
@@ -96,19 +94,19 @@ fn call_with_abi(
     // Check if the return is indirect (large struct returned via pointer)
     let ret_indirect = matches!(fn_abi.ret.mode, PassMode::Indirect { .. });
 
-    // SAFETY: fn_ptr was resolved via dlsym and arguments were validated above.
-    // The ABI matching is guaranteed by using the same toolchain for both
-    // compilation and interpretation.
     let result = if ret_indirect {
         let mut ret_buf = vec![0u8; ret_size];
         let ret_ptr = ret_buf.as_mut_ptr() as u64;
         raw_args.insert(0, ret_ptr);
+        // SAFETY: fn_ptr was resolved via dlsym, args validated, ABI matches same toolchain.
         unsafe { call_raw(fn_ptr, &raw_args, 0) };
         Value::from_bytes(&ret_buf)
     } else if ret_size == 0 {
+        // SAFETY: fn_ptr was resolved via dlsym, args validated, ABI matches same toolchain.
         unsafe { call_raw(fn_ptr, &raw_args, 0) };
         Value::unit().clone()
     } else {
+        // SAFETY: fn_ptr was resolved via dlsym, args validated, ABI matches same toolchain.
         let raw_ret = unsafe { call_raw(fn_ptr, &raw_args, ret_size) };
         let ret_bytes = raw_ret.to_le_bytes();
         // For scalar-pair returns, we need both halves
@@ -129,85 +127,44 @@ fn call_with_abi(
 /// # Safety
 ///
 /// Caller must ensure fn_ptr is valid and arguments match the expected ABI.
+///
+/// # FIXME
+///
+/// This uses `extern "C"` calling convention which does not match Rust's internal ABI.
+/// It works by accident for scalar arguments on x86-64 because both ABIs pass them in
+/// the same registers. A proper fix would use `libffi` or reconstruct the exact Rust
+/// fn pointer type from the monomorphized signature.
 unsafe fn call_raw(fn_ptr: *const (), args: &[u64], ret_size: usize) -> u128 {
-    unsafe {
-        // Transmute to various function signatures based on argument count.
-        // This is the simplest approach that works for the System V AMD64 ABI
-        // where the first 6 integer/pointer args go in registers.
-        match args.len() {
-            0 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn() -> u64 = std::mem::transmute(fn_ptr);
-                    f() as u128
-                } else {
-                    let f: unsafe extern "C" fn() -> u128 = std::mem::transmute(fn_ptr);
-                    f()
-                }
-            }
-            1 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn(u64) -> u64 = std::mem::transmute(fn_ptr);
-                    f(args[0]) as u128
-                } else {
-                    let f: unsafe extern "C" fn(u64) -> u128 = std::mem::transmute(fn_ptr);
-                    f(args[0])
-                }
-            }
-            2 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn(u64, u64) -> u64 = std::mem::transmute(fn_ptr);
-                    f(args[0], args[1]) as u128
-                } else {
-                    let f: unsafe extern "C" fn(u64, u64) -> u128 = std::mem::transmute(fn_ptr);
-                    f(args[0], args[1])
-                }
-            }
-            3 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn(u64, u64, u64) -> u64 = std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2]) as u128
-                } else {
-                    let f: unsafe extern "C" fn(u64, u64, u64) -> u128 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2])
-                }
-            }
-            4 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn(u64, u64, u64, u64) -> u64 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2], args[3]) as u128
-                } else {
-                    let f: unsafe extern "C" fn(u64, u64, u64, u64) -> u128 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2], args[3])
-                }
-            }
-            5 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2], args[3], args[4]) as u128
-                } else {
-                    let f: unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u128 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2], args[3], args[4])
-                }
-            }
-            6 => {
-                if ret_size <= 8 {
-                    let f: unsafe extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2], args[3], args[4], args[5]) as u128
-                } else {
-                    let f: unsafe extern "C" fn(u64, u64, u64, u64, u64, u64) -> u128 =
-                        std::mem::transmute(fn_ptr);
-                    f(args[0], args[1], args[2], args[3], args[4], args[5])
-                }
-            }
-            n => {
-                panic!("Native call with {n} register args not supported (max 6)");
-            }
+    macro_rules! native_call {
+        ($ret:ty $(, $arg:expr)*) => {{
+            type FnSig = unsafe extern "C" fn($(native_call!(@ty $arg)),*) -> $ret;
+            // SAFETY: Caller guarantees fn_ptr is valid with this signature.
+            let f: FnSig = unsafe { std::mem::transmute(fn_ptr) };
+            // SAFETY: Arguments were validated and ABI matches (same toolchain).
+            unsafe { f($($arg),*) }
+        }};
+        (@ty $e:expr) => { u64 };
+    }
+
+    match args.len() {
+        0 if ret_size <= 8 => native_call!(u64) as u128,
+        0 => native_call!(u128),
+        1 if ret_size <= 8 => native_call!(u64, args[0]) as u128,
+        1 => native_call!(u128, args[0]),
+        2 if ret_size <= 8 => native_call!(u64, args[0], args[1]) as u128,
+        2 => native_call!(u128, args[0], args[1]),
+        3 if ret_size <= 8 => native_call!(u64, args[0], args[1], args[2]) as u128,
+        3 => native_call!(u128, args[0], args[1], args[2]),
+        4 if ret_size <= 8 => native_call!(u64, args[0], args[1], args[2], args[3]) as u128,
+        4 => native_call!(u128, args[0], args[1], args[2], args[3]),
+        5 if ret_size <= 8 => {
+            native_call!(u64, args[0], args[1], args[2], args[3], args[4]) as u128
         }
+        5 => native_call!(u128, args[0], args[1], args[2], args[3], args[4]),
+        6 if ret_size <= 8 => {
+            native_call!(u64, args[0], args[1], args[2], args[3], args[4], args[5]) as u128
+        }
+        6 => native_call!(u128, args[0], args[1], args[2], args[3], args[4], args[5]),
+        n => panic!("Native call with {n} register args not supported (max 6)"),
     }
 }
