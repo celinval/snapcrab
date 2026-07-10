@@ -5,6 +5,7 @@ mod common;
 
 mod integration_tests {
     mod enum_tests;
+    mod std_tests;
 }
 
 use common::TestResult;
