@@ -20,12 +20,12 @@ impl PartialEq for TestResult {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (TestResult::Success, TestResult::Success) => true,
+            (TestResult::Success, TestResult::SuccessWithValue(v))
+            | (TestResult::SuccessWithValue(v), TestResult::Success) => v.is_empty(),
             (TestResult::SuccessWithValue(a), TestResult::SuccessWithValue(b)) => a == b,
             (TestResult::Error(a), TestResult::Error(b)) => a == b,
-            (TestResult::ErrorRegex(pattern), TestResult::Error(msg)) => {
-                regex::Regex::new(pattern).unwrap().is_match(msg)
-            }
-            (TestResult::Error(msg), TestResult::ErrorRegex(pattern)) => {
+            (TestResult::ErrorRegex(pattern), TestResult::Error(msg))
+            | (TestResult::Error(msg), TestResult::ErrorRegex(pattern)) => {
                 regex::Regex::new(pattern).unwrap().is_match(msg)
             }
             _ => false,
@@ -105,7 +105,15 @@ macro_rules! check_interpreter {
 
 #[macro_export]
 macro_rules! check_custom_start {
-    ($test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr, result=$expected:expr) => {
+    ($test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr $(,)?) => {
+        check_custom_start!(
+            $test_name,
+            input = $input_file,
+            start_fn = $start_fn,
+            result = crate::common::TestResult::Success
+        );
+    };
+    ($test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr, result=$expected:expr $(,)?) => {
         #[test]
         fn $test_name() {
             let input_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
