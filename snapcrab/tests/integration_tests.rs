@@ -22,9 +22,9 @@ check_interpreter!(
 );
 
 check_interpreter!(
-    test_arithmetic_error,
+    test_arithmetic,
     input = "arithmetic.rs",
-    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CheckedBinaryOp.*".to_string())
+    result = TestResult::Success
 );
 
 // Custom start function tests
@@ -128,7 +128,7 @@ check_custom_start!(
     test_multiple_references,
     input = "reference_test.rs",
     start_fn = "test_multiple_refs",
-    result = TestResult::ErrorRegex(r".*Unsupported rvalue.*CheckedBinaryOp.*".to_string())
+    result = TestResult::SuccessWithValue(vec![20, 0, 0, 0])
 );
 
 check_custom_start!(

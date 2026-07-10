@@ -231,6 +231,21 @@ impl<'a> FnInterpreter<'a> {
                 let source_ty = operand.ty(self.locals())?;
                 self.perform_cast(cast_kind, value, source_ty, *target_ty)
             }
+            Rvalue::CheckedBinaryOp(op, left, right) => {
+                let left_val = self.evaluate_operand(left)?;
+                let right_val = self.evaluate_operand(right)?;
+                let operand_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
+                let result_ty = rvalue.ty(self.locals())?;
+                match op.eval(&left_val, &right_val, operand_type) {
+                    Ok(val) => {
+                        Value::from_tuple_with_layout(&[val, Value::from_bool(false)], result_ty)
+                    }
+                    Err(_) => {
+                        let zero = Value::with_size(left_val.len());
+                        Value::from_tuple_with_layout(&[zero, Value::from_bool(true)], result_ty)
+                    }
+                }
+            }
             Rvalue::Aggregate(kind, operands) => self.eval_aggregate(rvalue, kind, operands),
             Rvalue::Repeat(operand, count) => {
                 let value = self.evaluate_operand(operand)?;
