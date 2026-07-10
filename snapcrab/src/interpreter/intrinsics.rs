@@ -12,7 +12,13 @@ use tracing::debug;
 pub fn eval_intrinsic(name: &str, args: &[Value], instance: Instance) -> Result<Value> {
     debug!("Intrinsic: {name}");
     match name {
-        "assume" => Ok(Value::unit().clone()),
+        "assume" => {
+            let val = args[0].as_bool().unwrap();
+            if !val {
+                bail!("Assumption violated in `{}`", instance.name());
+            }
+            Ok(Value::unit().clone())
+        }
         "likely" | "unlikely" => Ok(args[0].clone()),
         "transmute" | "transmute_unchecked" => Ok(args[0].clone()),
         "forget" => Ok(Value::unit().clone()),
