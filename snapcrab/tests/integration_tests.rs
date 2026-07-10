@@ -703,12 +703,13 @@ check_custom_start!(
     result = TestResult::SuccessWithValue(vec![65, 0, 0, 0])
 );
 
+// Currently ignored: unwrap() calls panic machinery which has no MIR body available.
 check_custom_start!(
     #[ignore]
     test_invalid_char_from_u32,
     input = "char_test.rs",
     start_fn = "invalid_char_from_u32",
-    result = TestResult::ErrorRegex(r".*panicked.*".to_string())
+    result = TestResult::ErrorRegex(r".*panicked.*None.*".to_string())
 );
 
 check_custom_start!(
