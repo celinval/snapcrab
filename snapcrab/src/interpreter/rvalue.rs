@@ -2,9 +2,7 @@ use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
-use rustc_public::mir::{
-    AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp,
-};
+use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
 use rustc_public::ty::{IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
