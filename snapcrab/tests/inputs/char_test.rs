@@ -21,8 +21,8 @@ pub fn u32_to_char() -> char {
 }
 
 // Invalid char from u32 - None case
-pub fn invalid_char_from_u32() -> char {
-    char::from_u32(0x110000).unwrap()
+pub fn invalid_char_from_u32() {
+    assert!(char::from_u32(0x110000).is_none());
 }
 
 // Char is alphabetic
