@@ -8,6 +8,10 @@ This guide will help you get started contributing to the project.
 Whether you're fixing a bug, adding a feature, or improving documentation,
 this guide covers the development practices and tools that will help you contribute effectively.
 
+We welcome AI-assisted contributions. Agents are tools — use them to raise quality, not just speed.
+No need to disclose agent usage; what matters is the result.
+See [AGENTS.md](https://github.com/celinval/snapcrab/blob/main/AGENTS.md) for AI-specific guidelines.
+
 Before making code changes, we recommend creating an issue if one doesn't exist yet,
 and commenting that you would like to work on it.
 This helps avoid conflicting contributions and allows for discussion about the approach.
@@ -121,4 +125,30 @@ Save this as `.git/hooks/commit-msg` and make it executable:
 
 ```bash
 chmod +x .git/hooks/commit-msg
+```
+
+## Code Style
+
+### Import and Path Conventions
+
+Prefer short, unqualified names over fully qualified paths:
+
+- **Types (structs, enums, constants)**: Import and use unqualified unless
+  there's a name collision. E.g., `CheckConfig` not
+  `crate::interpreter::check::CheckConfig`.
+- **Functions**: Use the parent module as qualifier, e.g., `check::validate_value()`
+  not `crate::interpreter::check::validate_value()`.
+- **Disambiguation**: Only use longer paths when two items share the same name.
+
+```rust
+// Good
+use crate::interpreter::check::CheckConfig;
+use rustc_public::abi::{FieldsShape, VariantsShape};
+
+let config = CheckConfig::default();
+check::validate_value(&val, ty, &config)?;
+
+// Avoid
+let config = crate::interpreter::check::CheckConfig::default();
+crate::interpreter::check::validate_value(&val, ty, &config)?;
 ```

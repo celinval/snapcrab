@@ -30,3 +30,12 @@ Early development phase. Starting with a limited subset of Rust syntax to evalua
 ## Target Use Case
 
 Developers who want to quickly execute tests and small programs during development without waiting for the full Rust compilation pipeline.
+
+## Contributing
+
+We welcome contributions, including those assisted by AI coding agents.
+AI agents are tools like any other — there's no need to disclose their use.
+What matters is the quality of the final code.
+Contributors are responsible for everything they submit, regardless of how it was produced.
+
+See the [developer guide](https://celinval.github.io/snapcrab/developer.html) to get started, and [AGENTS.md](AGENTS.md) for AI-assisted contribution guidelines.
