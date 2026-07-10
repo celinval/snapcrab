@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use core::mem;
+use std::mem;
 
 /// Single-variant enum with no fields (ZST).
 pub enum UnitSingle {

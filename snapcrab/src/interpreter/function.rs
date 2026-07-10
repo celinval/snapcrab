@@ -8,6 +8,8 @@ use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, Term
 use rustc_public::ty::{ConstantKind, MirConst, RigidTy, TyKind};
 use tracing::{debug, info};
 
+use super::rvalue::write_discriminant;
+
 /// Function interpreter that executes MIR (Mid-level Intermediate Representation) code.
 ///
 /// The interpreter maintains a stack frame for local variables and executes basic blocks
@@ -196,6 +198,16 @@ impl FnInterpreter<'_> {
                 let value = self.evaluate_rvalue(rvalue)?;
                 self.assign_to_place(place, value)?;
             }
+            StatementKind::SetDiscriminant {
+                place,
+                variant_index,
+            } => {
+                let enum_ty = place.ty(self.locals())?;
+                let addr = self.resolve_place_addr(place)?;
+                let mut enum_val = self.memory.read_addr(addr, enum_ty)?;
+                write_discriminant(enum_val.as_bytes_mut(), enum_ty, *variant_index)?;
+                self.memory.write_addr(addr, enum_val.as_bytes(), enum_ty)?;
+            }
             StatementKind::StorageLive(_) | StatementKind::StorageDead(_) => {
                 // Ignore storage annotations for now
             }
@@ -290,6 +302,9 @@ impl FnInterpreter<'_> {
                         .unwrap_or("Failed to get assert description");
                     bail!("Assertion failed: {}", msg_str);
                 }
+            }
+            TerminatorKind::Unreachable => {
+                bail!("Entered unreachable code");
             }
             _ => {
                 bail!("Unsupported terminator: {:?}", terminator.kind);

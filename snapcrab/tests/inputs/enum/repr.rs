@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use core::mem;
+use std::mem;
 
 /// repr(u8) fieldless enum.
 #[repr(u8)]

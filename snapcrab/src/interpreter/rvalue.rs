@@ -2,8 +2,10 @@ use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
+use rustc_public::abi::{TagEncoding, VariantsShape};
 use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
-use rustc_public::ty::{IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy};
+use rustc_public::ty::{AdtDef, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx};
+use rustc_public_bridge::IndexedVal;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::function::FnInterpreter;
@@ -246,6 +248,11 @@ impl<'a> FnInterpreter<'a> {
                     }
                 }
             }
+            Rvalue::Discriminant(place) => {
+                let enum_ty = place.ty(self.locals())?;
+                let enum_val = self.read_from_place(place)?;
+                read_discriminant(&enum_val, enum_ty)
+            }
             Rvalue::Aggregate(kind, operands) => self.eval_aggregate(rvalue, kind, operands),
             Rvalue::Repeat(operand, count) => {
                 let value = self.evaluate_operand(operand)?;
@@ -272,9 +279,13 @@ impl<'a> FnInterpreter<'a> {
                 let ty = rvalue.ty(self.locals())?;
                 Ok(Value::from_val_with_padding(&value, ty.size()?))
             }
-            AggregateKind::Adt(def, _, _, _, _) if def.kind().is_enum() => {
-                // Need to implement set discriminant
-                bail!("Unsupported `enum` aggregation")
+            AggregateKind::Adt(def, variant_idx, _, _, _) if def.kind().is_enum() => {
+                let ty = rvalue.ty(self.locals())?;
+                let mut values = Vec::new();
+                for operand in operands {
+                    values.push(self.evaluate_operand(operand)?);
+                }
+                build_enum_variant(&values, ty, *def, *variant_idx)
             }
             AggregateKind::Tuple | AggregateKind::Adt(..) | AggregateKind::Closure(..) => {
                 let mut values = Vec::new();
@@ -380,6 +391,189 @@ fn perform_unsized_coercion(value: Value, src_ptr_ty: Ty, dst_ptr_ty: Ty) -> Res
     } else {
         bail!("Unsupported coercion {src_ptr_ty} -> {dst_ptr_ty}")
     }
+}
+
+fn tag_scalar_size(
+    tag: &rustc_public::abi::Scalar,
+    target: &rustc_public::target::MachineInfo,
+) -> usize {
+    let prim = match tag {
+        rustc_public::abi::Scalar::Initialized { value, .. }
+        | rustc_public::abi::Scalar::Union { value } => *value,
+    };
+    prim.size(target).bytes()
+}
+
+/// Read the discriminant value from an enum's in-memory representation.
+pub(super) fn read_discriminant(enum_val: &Value, enum_ty: Ty) -> Result<Value> {
+    let layout = enum_ty.layout()?;
+    let shape = layout.shape();
+    let discr_ty = enum_ty.kind().discriminant_ty().unwrap();
+    let discr_size = discr_ty.size()?;
+
+    match &shape.variants {
+        VariantsShape::Single { index } => {
+            // Single-variant enum: discriminant is always that variant's value
+            let TyKind::RigidTy(RigidTy::Adt(def, _)) = enum_ty.kind() else {
+                return Ok(Value::with_size(discr_size));
+            };
+            let discr = def.discriminant_for_variant(*index);
+            Ok(discr_value_to_bytes(discr.val, discr_size))
+        }
+        VariantsShape::Multiple {
+            tag,
+            tag_encoding,
+            tag_field,
+            ..
+        } => {
+            let target = rustc_public::target::MachineInfo::target();
+            let tag_sz = tag_scalar_size(tag, &target);
+            let tag_off = match &shape.fields {
+                rustc_public::abi::FieldsShape::Arbitrary { offsets } => {
+                    offsets[*tag_field].bytes()
+                }
+                _ => bail!("Unexpected field shape for enum"),
+            };
+            let tag_bytes = &enum_val.as_bytes()[tag_off..tag_off + tag_sz];
+            let tag_val = read_uint(tag_bytes);
+
+            let TyKind::RigidTy(RigidTy::Adt(def, _)) = enum_ty.kind() else {
+                bail!("Expected ADT for discriminant read");
+            };
+
+            let discr_val = match tag_encoding {
+                TagEncoding::Direct => tag_val,
+                TagEncoding::Niche {
+                    untagged_variant,
+                    niche_variants,
+                    niche_start,
+                } => {
+                    let niche_start_idx = niche_variants.start().to_index();
+                    let niche_end_idx = niche_variants.end().to_index();
+                    let variant_count = niche_end_idx - niche_start_idx + 1;
+                    let max_tag = u128::MAX >> (128 - tag_sz * 8);
+                    let relative = tag_val.wrapping_sub(*niche_start) & max_tag;
+                    if relative < variant_count as u128 {
+                        let variant_idx = VariantIdx::to_val(niche_start_idx + relative as usize);
+                        def.discriminant_for_variant(variant_idx).val
+                    } else {
+                        def.discriminant_for_variant(*untagged_variant).val
+                    }
+                }
+            };
+            Ok(discr_value_to_bytes(discr_val, discr_size))
+        }
+        _ => Ok(Value::with_size(discr_size)),
+    }
+}
+
+/// Write a discriminant tag into an enum value's bytes.
+pub(super) fn write_discriminant(
+    enum_val: &mut [u8],
+    enum_ty: Ty,
+    variant_idx: VariantIdx,
+) -> Result<()> {
+    let layout = enum_ty.layout()?;
+    let shape = layout.shape();
+
+    match &shape.variants {
+        VariantsShape::Single { .. } => {
+            // Nothing to write for single-variant enums
+            Ok(())
+        }
+        VariantsShape::Multiple {
+            tag,
+            tag_encoding,
+            tag_field,
+            ..
+        } => {
+            let target = rustc_public::target::MachineInfo::target();
+            let tag_sz = tag_scalar_size(tag, &target);
+            let tag_off = match &shape.fields {
+                rustc_public::abi::FieldsShape::Arbitrary { offsets } => {
+                    offsets[*tag_field].bytes()
+                }
+                _ => bail!("Unexpected field shape for enum"),
+            };
+
+            let TyKind::RigidTy(RigidTy::Adt(def, _)) = enum_ty.kind() else {
+                bail!("Expected ADT for SetDiscriminant");
+            };
+
+            let tag_val = match tag_encoding {
+                TagEncoding::Direct => def.discriminant_for_variant(variant_idx).val,
+                TagEncoding::Niche {
+                    untagged_variant,
+                    niche_variants,
+                    niche_start,
+                } => {
+                    if variant_idx == *untagged_variant {
+                        // Untagged variant: don't write anything (payload determines it)
+                        return Ok(());
+                    }
+                    let niche_start_idx = niche_variants.start().to_index();
+                    let relative = variant_idx.to_index() - niche_start_idx;
+                    niche_start.wrapping_add(relative as u128)
+                }
+            };
+            write_uint(&mut enum_val[tag_off..tag_off + tag_sz], tag_val);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Build an enum variant value with fields placed at the correct offsets.
+fn build_enum_variant(
+    field_values: &[Value],
+    enum_ty: Ty,
+    _def: AdtDef,
+    variant_idx: VariantIdx,
+) -> Result<Value> {
+    let total_size = enum_ty.size()?;
+    let layout = enum_ty.layout()?;
+    let shape = layout.shape();
+
+    let mut result = Value::with_size(total_size);
+
+    let offsets = match &shape.variants {
+        VariantsShape::Multiple { variants, .. } => &variants[variant_idx.to_index()].offsets,
+        VariantsShape::Single { .. } => match &shape.fields {
+            rustc_public::abi::FieldsShape::Arbitrary { offsets } => offsets,
+            _ => return Ok(result),
+        },
+        _ => return Ok(result),
+    };
+
+    // Place field values at their offsets
+    for (i, val) in field_values.iter().enumerate() {
+        if val.len() > 0 {
+            let offset = offsets[i].bytes();
+            let end = offset + val.len();
+            result.as_bytes_mut()[offset..end].copy_from_slice(val.as_bytes());
+        }
+    }
+
+    // Write the discriminant tag
+    write_discriminant(result.as_bytes_mut(), enum_ty, variant_idx)?;
+
+    Ok(result)
+}
+
+fn discr_value_to_bytes(val: u128, size: usize) -> Value {
+    let bytes = val.to_le_bytes();
+    Value::from_bytes(&bytes[..size])
+}
+
+fn read_uint(bytes: &[u8]) -> u128 {
+    let mut buf = [0u8; 16];
+    buf[..bytes.len()].copy_from_slice(bytes);
+    u128::from_le_bytes(buf)
+}
+
+fn write_uint(dest: &mut [u8], val: u128) {
+    let bytes = val.to_le_bytes();
+    dest.copy_from_slice(&bytes[..dest.len()]);
 }
 
 #[cfg(test)]

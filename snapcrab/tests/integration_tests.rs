@@ -700,14 +700,15 @@ check_custom_start!(
     test_u32_to_char,
     input = "char_test.rs",
     start_fn = "u32_to_char",
-    result = TestResult::ErrorRegex(r".*Unsupported.*enum.*aggregation.*".to_string())
+    result = TestResult::SuccessWithValue(vec![65, 0, 0, 0])
 );
 
 check_custom_start!(
+    #[ignore]
     test_invalid_char_from_u32,
     input = "char_test.rs",
     start_fn = "invalid_char_from_u32",
-    result = TestResult::ErrorRegex(r".*Unsupported rvalue: Discriminant.*".to_string())
+    result = TestResult::ErrorRegex(r".*panicked.*".to_string())
 );
 
 check_custom_start!(

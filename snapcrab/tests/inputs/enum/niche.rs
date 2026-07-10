@@ -1,9 +1,9 @@
 #![allow(unused)]
 
-use core::mem;
-use core::num::NonZeroU32;
-use core::num::NonZeroU8;
-use core::num::NonZeroUsize;
+use std::mem;
+use std::num::NonZeroU32;
+use std::num::NonZeroU8;
+use std::num::NonZeroUsize;
 
 /// Niche optimization: Option<NonZeroU32> should be same size as u32.
 pub fn test_option_nonzero_u32_size() {
