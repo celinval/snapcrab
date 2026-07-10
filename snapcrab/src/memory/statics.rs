@@ -21,8 +21,12 @@ pub struct Statics {
 
 #[derive(Default)]
 struct StaticsInner {
-    /// Backing storage keyed by real address.
-    allocations: Vec<Vec<u8>>,
+    /// Backing storage for materialized allocations.
+    ///
+    /// Each entry is a `Box<[u8]>` whose heap pointer remains stable regardless of
+    /// how the outer `Vec` grows — pushing new entries may move the `Box` structs,
+    /// but not the heap buffers they point to.
+    allocations: Vec<Box<[u8]>>,
     /// Maps AllocId index to the index in `allocations`.
     alloc_map: HashMap<usize, usize>,
     /// Tracks which addresses belong to us for bounds checking.
@@ -73,12 +77,14 @@ impl Statics {
             buf[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
         }
 
+        let boxed: Box<[u8]> = buf.into_boxed_slice();
+        let addr = boxed.as_ptr() as usize;
+        let len = boxed.len();
+
         let mut inner = self.inner.borrow_mut();
         let alloc_idx = inner.allocations.len();
-        inner.allocations.push(buf);
-        let addr = inner.allocations[alloc_idx].as_ptr() as usize;
-        let len = inner.allocations[alloc_idx].len();
-        // Safety: we just pushed this, so the pointer is valid.
+        inner.allocations.push(boxed);
+        // SAFETY: Box heap pointer remains stable after push (only the Box struct moves).
         let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, len) };
         inner.sanitizer.register_alloc(slice);
         inner.alloc_map.insert(id_idx, alloc_idx);
@@ -96,8 +102,8 @@ unsafe impl MemorySegment for Statics {
         if !inner.sanitizer.contains(address, size) {
             return Err(MemoryAccessError::NotFound);
         }
-        // SAFETY: sanitizer confirmed the range is within a live allocation.
         let ptr = address as *const u8;
+        // SAFETY: sanitizer confirmed the range is within a live allocation.
         Ok(unsafe { std::slice::from_raw_parts(ptr, size) })
     }
 
