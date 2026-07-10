@@ -5,6 +5,8 @@
 //! bounds checking for memory safety.
 use std::collections::BTreeMap;
 
+use super::MemoryAccessError;
+
 /// Tracks memory allocations and validates memory access bounds.
 ///
 /// Maintains a record of all allocated memory regions with their addresses and sizes.
@@ -52,21 +54,26 @@ impl MemorySanitizer {
     }
 
     /// Checks if a memory range is entirely contained within a single allocation.
-    ///
-    /// # Arguments
-    /// * `address` - Starting address of the range to check
-    /// * `size` - Size of the range in bytes
-    ///
-    /// # Returns
-    /// * `true` - If the entire range is within a single allocation
-    /// * `false` - If any part of the range is outside allocated memory
     pub fn contains(&self, address: usize, size: usize) -> bool {
+        self.check_access(address, size).is_ok()
+    }
+
+    /// Check whether an address range is valid, partially valid, or not found.
+    pub fn check_access(&self, address: usize, size: usize) -> Result<(), MemoryAccessError> {
         if let Some((&start, &alloc_size)) = self.allocations.range(..=address).next_back() {
-            let alloc_end = start + alloc_size;
-            let request_end = address + size;
-            address >= start && request_end <= alloc_end
+            if address >= start && address < start + alloc_size {
+                let request_end = address + size;
+                let alloc_end = start + alloc_size;
+                if request_end <= alloc_end {
+                    Ok(())
+                } else {
+                    Err(MemoryAccessError::OutOfBounds)
+                }
+            } else {
+                Err(MemoryAccessError::NotFound)
+            }
         } else {
-            false
+            Err(MemoryAccessError::NotFound)
         }
     }
 

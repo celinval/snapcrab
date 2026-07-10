@@ -404,7 +404,14 @@ impl FnInterpreter<'_> {
     fn evaluate_constant(&self, const_: &MirConst) -> Result<Value> {
         match const_.kind() {
             ConstantKind::Allocated(alloc) => {
-                let bytes = alloc.raw_bytes()?;
+                let mut bytes = alloc.raw_bytes()?;
+                // Resolve provenance entries (pointers to other allocations).
+                let ptr_size = crate::memory::pointer_width();
+                for (offset, prov) in &alloc.provenance.ptrs {
+                    let addr = self.memory.resolve_alloc(prov.0);
+                    let addr_bytes = addr.to_le_bytes();
+                    bytes[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
+                }
                 Ok(Value::from_bytes(&bytes))
             }
             ConstantKind::ZeroSized => Ok(Value::unit().clone()),

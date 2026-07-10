@@ -739,3 +739,29 @@ check_custom_start!(
     start_fn = "struct_array_to_slice",
     result = TestResult::ErrorRegex(r".*Unsupported coercion.*Container.*".to_string())
 );
+
+// Static data / constant provenance tests
+check_custom_start!(
+    test_str_len,
+    input = "static_data.rs",
+    start_fn = "test_str_len",
+);
+
+check_custom_start!(
+    test_str_array_lens,
+    input = "static_data.rs",
+    start_fn = "test_str_array_lens",
+);
+
+check_custom_start!(
+    #[ignore]
+    test_static_str_slice_len,
+    input = "static_data.rs",
+    start_fn = "test_static_str_slice_len",
+);
+
+check_custom_start!(
+    test_byte_array_ref,
+    input = "static_data.rs",
+    start_fn = "test_byte_array_ref",
+);

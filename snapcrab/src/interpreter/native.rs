@@ -32,8 +32,10 @@ pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> 
 
     let ret_size = fn_abi.ret.ty.layout()?.shape().size.bytes();
 
-    // Resolve symbol from the current process via dlsym(RTLD_DEFAULT, ...)
+    // Resolve symbol from the current process via dlsym(RTLD_DEFAULT, ...).
     let symbol_name = mangled.as_str();
+    // SAFETY: dlsym with RTLD_DEFAULT searches the current process's loaded symbols.
+    // The returned pointer is valid for the process lifetime (std is always loaded).
     let fn_ptr = unsafe {
         let c_name = CString::new(symbol_name).expect("Symbol name should not contain null bytes");
         let ptr = libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr());
@@ -94,8 +96,10 @@ fn call_with_abi(
     // Check if the return is indirect (large struct returned via pointer)
     let ret_indirect = matches!(fn_abi.ret.mode, PassMode::Indirect { .. });
 
+    // SAFETY: fn_ptr was resolved via dlsym and arguments were validated above.
+    // The ABI matching is guaranteed by using the same toolchain for both
+    // compilation and interpretation.
     let result = if ret_indirect {
-        // Allocate space for the return value and pass its pointer as first arg
         let mut ret_buf = vec![0u8; ret_size];
         let ret_ptr = ret_buf.as_mut_ptr() as u64;
         raw_args.insert(0, ret_ptr);

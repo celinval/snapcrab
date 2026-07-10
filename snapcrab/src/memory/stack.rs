@@ -31,24 +31,21 @@ pub struct Stack {
     frames: Vec<StackFrame>,
 }
 
+// SAFETY: Stack frames are backed by Vec<u8> whose addresses remain stable
+// while the frame is alive. The sanitizer tracks these allocations and
+// validates that all accesses fall within registered ranges.
 unsafe impl MemorySegment for Stack {
     fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError> {
-        if self.sanitizer.contains(address, size) {
-            // SAFETY: sanitizer verified the address range is valid
-            Ok(unsafe { std::slice::from_raw_parts(address as *const u8, size) })
-        } else {
-            Err(MemoryAccessError::OutOfBounds)
-        }
+        self.sanitizer.check_access(address, size)?;
+        // SAFETY: check_access verified the range is within a live allocation.
+        Ok(unsafe { std::slice::from_raw_parts(address as *const u8, size) })
     }
 
     fn write_addr(&self, address: usize, data: &[u8]) -> Result<(), MemoryAccessError> {
-        if self.sanitizer.contains(address, data.len()) {
-            // SAFETY: sanitizer verified the address range is valid
-            unsafe { std::ptr::copy(data.as_ptr(), address as *mut u8, data.len()) };
-            Ok(())
-        } else {
-            Err(MemoryAccessError::OutOfBounds)
-        }
+        self.sanitizer.check_access(address, data.len())?;
+        // SAFETY: check_access verified the range is within a live allocation.
+        unsafe { std::ptr::copy(data.as_ptr(), address as *mut u8, data.len()) };
+        Ok(())
     }
 }
 

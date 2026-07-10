@@ -40,7 +40,6 @@ pub struct ThreadMemory {
     stack: Stack,
     #[allow(unused)]
     heap: Heap,
-    #[allow(unused)]
     statics: Statics,
     /// Configuration for which UB checks to perform.
     pub check_config: CheckConfig,
@@ -62,8 +61,12 @@ impl ThreadMemory {
         Stack::with_stack_frame(instance, self, func)
     }
 
+    /// Resolve a compiler AllocId to a real memory address.
+    pub fn resolve_alloc(&self, alloc_id: rustc_public::mir::alloc::AllocId) -> usize {
+        self.statics.resolve_alloc(alloc_id)
+    }
+
     /// Read local variable.
-    /// TODO: Use rustc_public Local here and in subsequent calls
     #[inline]
     #[allow(dead_code)]
     pub fn read_local(&self, local: usize, local_ty: Ty) -> Result<Value> {
