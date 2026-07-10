@@ -12,6 +12,7 @@
 //! Downside:
 //! - It makes it harder to check for buffer overflow.
 
+use super::ThreadMemory;
 use crate::memory::sanitizer::MemorySanitizer;
 use crate::memory::{MemoryAccessError, MemorySegment};
 use crate::ty::MonoType;
@@ -20,9 +21,6 @@ use anyhow::Result;
 use rustc_public::mir::Body;
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::Ty;
-use std::pin::Pin;
-
-use super::ThreadMemory;
 
 /// Stack memory manager containing sanitizer and stack frames
 #[derive(Default, Debug)]
@@ -31,8 +29,8 @@ pub struct Stack {
     frames: Vec<StackFrame>,
 }
 
-// SAFETY: Stack frames are backed by Vec<u8> whose addresses remain stable
-// while the frame is alive. The sanitizer tracks these allocations and
+// SAFETY: Stack frames are backed by Box<[u8]> whose heap buffer addresses remain
+// stable for the frame's lifetime. The sanitizer tracks these allocations and
 // validates that all accesses fall within registered ranges.
 unsafe impl MemorySegment for Stack {
     fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError> {
@@ -102,8 +100,8 @@ impl Stack {
 /// Variables are stored as raw bytes at calculated offsets.
 #[derive(Debug)]
 pub struct StackFrame {
-    /// Holds the stack data. We require this data to stay in the same location
-    data: Pin<Box<[u8]>>,
+    /// Contiguous byte buffer for all locals. Heap address is stable.
+    data: Box<[u8]>,
     /// Maps local to the data[offset].
     offsets: Vec<usize>,
 }
@@ -134,9 +132,7 @@ impl StackFrame {
             current_offset += size;
         }
 
-        // We should replace this with Box::new_zeroed_slice once it's stable.
-        let buffer = vec![0; current_offset];
-        let data = Box::into_pin(buffer.into_boxed_slice());
+        let data = vec![0; current_offset].into_boxed_slice();
 
         Self { data, offsets }
     }
