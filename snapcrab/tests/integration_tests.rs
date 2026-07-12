@@ -791,6 +791,18 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_wide_ptr_eq,
+    input = "wide_ptr.rs",
+    start_fn = "test_wide_ptr_eq",
+);
+
+check_custom_start!(
+    test_wide_ptr_ne,
+    input = "wide_ptr.rs",
+    start_fn = "test_wide_ptr_ne",
+);
+
+check_custom_start!(
     #[ignore]
     test_wrapper_slice_len,
     input = "wide_ptr.rs",

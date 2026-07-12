@@ -61,11 +61,12 @@ impl BinaryEval for BinOp {
             RigidTy::Bool => eval_bool_binop(*self, left, right),
             RigidTy::Char => eval_int_binop::<u32>(*self, left, right),
             RigidTy::RawPtr(_, _) | RigidTy::Ref(_, _, _) => {
-                let ty = Ty::from_rigid_kind(operand_type);
-                if !ty.is_thin_ptr() {
-                    bail!("Wide pointers not supported");
+                let ty = Ty::from_rigid_kind(operand_type.clone());
+                if ty.is_thin_ptr() {
+                    eval_int_binop::<usize>(*self, left, right)
+                } else {
+                    eval_wide_ptr_binop(*self, left, right, &operand_type)
                 }
-                eval_int_binop::<usize>(*self, left, right)
             }
             _ => bail!(
                 "Unsupported binary operation `{self:?}` on `{}` type",
@@ -152,6 +153,25 @@ where
         BinOp::Gt => Ok(Value::from_bool(left > right)),
         BinOp::Ge => Ok(Value::from_bool(left >= right)),
         _ => bail!("Unsupported integer binary operation: {:?}", op),
+    }
+}
+
+/// Evaluates a comparison on wide pointers (both halves must match).
+fn eval_wide_ptr_binop(op: BinOp, l: &Value, r: &Value, operand_type: &RigidTy) -> Result<Value> {
+    let pointee = match operand_type {
+        RigidTy::RawPtr(pointee, _) | RigidTy::Ref(_, pointee, _) => pointee,
+        _ => unreachable!(),
+    };
+    if pointee.kind().is_trait() {
+        tracing::warn!(
+            "Comparing trait object pointers: vtable address identity is not guaranteed \
+             to be stable across compilations (see rust-lang/unsafe-code-guidelines#239)"
+        );
+    }
+    match op {
+        BinOp::Eq => Ok(Value::from_bool(l.as_bytes() == r.as_bytes())),
+        BinOp::Ne => Ok(Value::from_bool(l.as_bytes() != r.as_bytes())),
+        _ => bail!("Unsupported binary operation on wide pointers: {:?}", op),
     }
 }
 
