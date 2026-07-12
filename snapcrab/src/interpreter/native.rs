@@ -38,6 +38,7 @@ pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> 
     debug!("Native call: {name} ({mangled})");
 
     let fn_abi = instance.fn_abi()?;
+    debug_fn_abi(&name, &mangled, &fn_abi, args.len());
 
     // Validate arguments before passing to native code.
     for (arg_abi, arg_val) in fn_abi.args.iter().zip(args.iter()) {
@@ -57,6 +58,27 @@ pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> 
 
     // Delegate to platform-specific calling convention handler.
     platform::call(fn_ptr.cast(), &fn_abi, args, &name)
+}
+
+/// Log detailed ABI information for a native call.
+fn debug_fn_abi(
+    name: &str,
+    mangled: &str,
+    fn_abi: &rustc_public::abi::FnAbi,
+    interpreter_args: usize,
+) {
+    if !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
+    debug!("  {name} ({mangled})");
+    debug!(
+        "  abi args: {}, interpreter args: {interpreter_args}",
+        fn_abi.args.len()
+    );
+    for (i, arg_abi) in fn_abi.args.iter().enumerate() {
+        debug!("  arg[{i}]: mode={:?}, ty={}", arg_abi.mode, arg_abi.ty);
+    }
+    debug!("  ret: mode={:?}, ty={}", fn_abi.ret.mode, fn_abi.ret.ty);
 }
 
 /// Check if a ValueAbi represents a float type.
