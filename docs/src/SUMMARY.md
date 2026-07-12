@@ -4,4 +4,5 @@
 - [Architecture](./architecture.md)
 - [Getting Started](./getting-started.md)
 - [Developer Guide](./developer.md)
+- [Native Calls](./native-calls.md)
 - [Next Steps](./next-steps.md)

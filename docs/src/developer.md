@@ -129,6 +129,11 @@ chmod +x .git/hooks/commit-msg
 
 ## Code Style
 
+### Code structure
+
+Public functions should be placed at the top of the module, followed by private functions.
+This priority helps with readability and maintainability.
+
 ### Import and Path Conventions
 
 Prefer short, unqualified names over fully qualified paths:
