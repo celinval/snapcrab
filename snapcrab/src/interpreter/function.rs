@@ -63,6 +63,18 @@ pub fn invoke_fn(
         );
     }
 
+    // Detect implicit arguments (e.g., #[track_caller] passes &Location).
+    let fn_abi = instance.fn_abi()?;
+    if fn_abi.args.len() > args.len() {
+        bail!(
+            "Failed to invoke `{}`: function expects {} arguments but got {} \
+             (implicit arguments like #[track_caller] are not yet supported)",
+            instance.name(),
+            fn_abi.args.len(),
+            args.len()
+        );
+    }
+
     // Tier 3: native call via dlsym
     let config = memory.check_config.clone();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

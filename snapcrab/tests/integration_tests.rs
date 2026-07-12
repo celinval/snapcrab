@@ -765,3 +765,22 @@ check_custom_start!(
     input = "static_data.rs",
     start_fn = "test_byte_array_ref",
 );
+
+// Hello world test (exercises println! → fmt machinery → native calls)
+check_interpreter!(
+    #[ignore]
+    test_hello_world,
+    input = "hello_world.rs",
+    result = TestResult::Success
+);
+
+// Native call tests (exercises the trampoline path via extern functions)
+check_custom_start!(test_libc_abs, input = "libc_call.rs", start_fn = "test_abs",);
+
+// Panic handling tests (exercises native call path via unwrap_failed)
+check_custom_start!(
+    test_unwrap_none_panics,
+    input = "unwrap_panic.rs",
+    start_fn = "unwrap_none",
+    result = TestResult::ErrorRegex(r".*#\[track_caller\] are not yet supported.*".to_string())
+);

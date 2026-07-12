@@ -89,7 +89,8 @@ pub fn run_custom_start_test(input_file: &Path, start_fn: &str) -> TestResult {
 
 #[macro_export]
 macro_rules! check_interpreter {
-    ($test_name:ident, input=$input_file:expr, result=$expected:expr) => {
+    ($(#[$attr:meta])* $test_name:ident, input=$input_file:expr, result=$expected:expr) => {
+        $(#[$attr])*
         #[test]
         fn $test_name() {
             let input_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
