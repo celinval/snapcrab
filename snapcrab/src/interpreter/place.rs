@@ -175,4 +175,26 @@ impl<'a> function::FnInterpreter<'a> {
         let addr = self.resolve_place_addr(place)?;
         self.memory.read_addr(addr, place_ty)
     }
+
+    /// Read a wide pointer for a place that dereferences a wide pointer.
+    ///
+    /// For a place like `*_1` where `_1: &str`, this reads the full 16-byte
+    /// wide pointer from `_1` rather than just computing the data address.
+    pub(super) fn read_wide_ptr_from_place(&self, place: &Place) -> Result<Value> {
+        // The place must be exactly `Deref` of a wide pointer local (no
+        // additional projections). More complex patterns would require
+        // reconstructing the metadata from subslice/index projections.
+        if place.projection.len() == 1 && matches!(place.projection[0], ProjectionElem::Deref) {
+            let ptr_ty = self.locals()[place.local].ty;
+            let addr = self.memory.local_address(place.local)?;
+            return self.memory.read_addr(addr, ptr_ty);
+        }
+        // TODO: support multi-projection wide pointer places (e.g., &(*w).field
+        // where w: &Wrapper<[u8]>). Requires reconstructing metadata from the
+        // container's unsized field. See test_wrapper_field_ref, test_wrapper_field_raw_ptr.
+        bail!(
+            "Unsupported wide pointer place: expected simple Deref, got {} projections",
+            place.projection.len()
+        )
+    }
 }

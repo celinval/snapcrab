@@ -560,7 +560,7 @@ check_custom_start!(
     test_read_str_byte,
     input = "str_test.rs",
     start_fn = "read_str_byte",
-    result = TestResult::ErrorRegex(r".*Wide pointers not supported.*".to_string())
+    result = TestResult::SuccessWithValue(vec![104])
 );
 
 // Char tests
@@ -776,6 +776,54 @@ check_interpreter!(
 
 // Native call tests (exercises the trampoline path via extern functions)
 check_custom_start!(test_libc_abs, input = "libc_call.rs", start_fn = "test_abs",);
+
+// Wide pointer tests
+check_custom_start!(
+    test_str_raw_ptr_metadata,
+    input = "wide_ptr.rs",
+    start_fn = "test_str_to_raw_ptr",
+);
+
+check_custom_start!(
+    test_str_reborrow,
+    input = "wide_ptr.rs",
+    start_fn = "test_str_reborrow",
+);
+
+check_custom_start!(
+    #[ignore]
+    test_wrapper_slice_len,
+    input = "wide_ptr.rs",
+    start_fn = "test_wrapper_slice_len",
+);
+
+check_custom_start!(
+    #[ignore]
+    test_wrapper_slice_elements,
+    input = "wide_ptr.rs",
+    start_fn = "test_wrapper_slice_elements",
+);
+
+check_custom_start!(
+    #[ignore]
+    test_wrapper_field_ref,
+    input = "wide_ptr.rs",
+    start_fn = "test_wrapper_field_ref",
+);
+
+check_custom_start!(
+    #[ignore]
+    test_wrapper_field_raw_ptr,
+    input = "wide_ptr.rs",
+    start_fn = "test_wrapper_field_raw_ptr",
+);
+
+check_custom_start!(
+    #[ignore]
+    test_wrapper_dyn_debug,
+    input = "wide_ptr.rs",
+    start_fn = "test_wrapper_dyn_debug",
+);
 
 // Panic handling tests (exercises native call path via unwrap_failed)
 check_custom_start!(

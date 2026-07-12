@@ -217,16 +217,22 @@ impl<'a> FnInterpreter<'a> {
             }
             Rvalue::Use(operand) => self.evaluate_operand(operand),
             Rvalue::Ref(_, _, place) => {
-                let address = self.resolve_place_addr(place)?;
-                Ok(Value::from_type(address))
+                let ty = rvalue.ty(self.locals())?;
+                if ty.is_wide_ptr() {
+                    self.read_wide_ptr_from_place(place)
+                } else {
+                    let address = self.resolve_place_addr(place)?;
+                    Ok(Value::from_type(address))
+                }
             }
             Rvalue::AddressOf(_, place) => {
                 let ty = rvalue.ty(self.locals())?;
-                if !ty.is_thin_ptr() {
-                    bail!("Wide pointers not supported");
+                if ty.is_wide_ptr() {
+                    self.read_wide_ptr_from_place(place)
+                } else {
+                    let address = self.resolve_place_addr(place)?;
+                    Ok(Value::from_type(address))
                 }
-                let address = self.resolve_place_addr(place)?;
-                Ok(Value::from_type(address))
             }
             Rvalue::Cast(cast_kind, operand, target_ty) => {
                 let value = self.evaluate_operand(operand)?;
@@ -392,6 +398,9 @@ fn perform_unsized_coercion(value: Value, src_ptr_ty: Ty, dst_ptr_ty: Ty) -> Res
 
         Ok(Value::new_wide_ptr(data_ptr, len))
     } else {
+        // TODO: support container coercion (e.g., &Wrapper<[u8; N]> -> &Wrapper<[u8]>)
+        // and trait object coercion (e.g., &Wrapper<T> -> &Wrapper<dyn Trait>).
+        // See test_wrapper_slice_len, test_wrapper_dyn_debug.
         bail!("Unsupported coercion {src_ptr_ty} -> {dst_ptr_ty}")
     }
 }
