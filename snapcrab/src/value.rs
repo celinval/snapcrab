@@ -270,9 +270,7 @@ impl Value {
             return self;
         }
 
-        let is_negative = self.len() > 0 && (self.data[self.len() - 1] & 0x80) != 0;
-
-        let mut result = if is_negative {
+        let mut result = if self.sign_bit() {
             Self {
                 data: smallvec![0xFF; target_size],
             }
@@ -350,6 +348,23 @@ impl Value {
             None
         }
     }
+
+    /// Read value as u128, zero-extending if shorter than 16 bytes.
+    pub fn read_uint(&self) -> u128 {
+        uint_from_bytes(&self.data)
+    }
+
+    /// Returns true if the most significant bit is set.
+    pub fn sign_bit(&self) -> bool {
+        self.data.last().is_some_and(|&b| b & 0x80 != 0)
+    }
+}
+
+/// Read a byte slice as u128, zero-extending if shorter than 16 bytes.
+pub fn uint_from_bytes(bytes: &[u8]) -> u128 {
+    let mut buf = [0u8; 16];
+    buf[..bytes.len()].copy_from_slice(bytes);
+    u128::from_le_bytes(buf)
 }
 
 impl From<&[u8]> for Value {

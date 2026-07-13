@@ -1,5 +1,5 @@
 use crate::ty::MonoType;
-use crate::value::Value;
+use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
 use rustc_public::abi::{TagEncoding, VariantsShape};
@@ -200,23 +200,12 @@ fn eval_shift(
     let is_signed_rhs = matches!(rhs_type, RigidTy::Int(_));
 
     // Read RHS as i128 to detect negative shifts.
-    let rhs_val = if is_signed_rhs {
+    let rhs_val = if is_signed_rhs && rhs.sign_bit() {
         let mut buf = [0xFFu8; 16];
-        let bytes = rhs.as_bytes();
-        buf[..bytes.len()].copy_from_slice(bytes);
-        // Sign-extend: check high bit of the actual value
-        if bytes.last().is_some_and(|&b| b & 0x80 != 0) {
-            // Already sign-extended via 0xFF fill
-        } else {
-            buf = [0u8; 16];
-            buf[..bytes.len()].copy_from_slice(bytes);
-        }
+        buf[..rhs.len()].copy_from_slice(rhs.as_bytes());
         i128::from_le_bytes(buf)
     } else {
-        let mut buf = [0u8; 16];
-        let bytes = rhs.as_bytes();
-        buf[..bytes.len()].copy_from_slice(bytes);
-        u128::from_le_bytes(buf) as i128
+        rhs.read_uint() as i128
     };
 
     let is_unchecked = matches!(op, BinOp::ShlUnchecked | BinOp::ShrUnchecked);
@@ -229,28 +218,24 @@ fn eval_shift(
 
     let shift = rhs_val.rem_euclid(lhs_bits as i128) as u32;
 
-    // Read LHS as u128 for shifting.
-    let mut lhs_buf = [0u8; 16];
-    lhs_buf[..lhs.len()].copy_from_slice(lhs.as_bytes());
-
     let result_bytes = match op {
         BinOp::Shl | BinOp::ShlUnchecked => {
-            let val = u128::from_le_bytes(lhs_buf);
-            let shifted = val << shift;
+            let shifted = lhs.read_uint() << shift;
             shifted.to_le_bytes()
         }
         BinOp::Shr | BinOp::ShrUnchecked if is_signed_lhs => {
             // Arithmetic shift: sign-extend LHS to i128.
-            if lhs.as_bytes().last().is_some_and(|&b| b & 0x80 != 0) {
-                lhs_buf[lhs.len()..].fill(0xFF);
-            }
-            let val = i128::from_le_bytes(lhs_buf);
-            let shifted = val >> shift;
+            let mut buf = if lhs.sign_bit() {
+                [0xFFu8; 16]
+            } else {
+                [0u8; 16]
+            };
+            buf[..lhs.len()].copy_from_slice(lhs.as_bytes());
+            let shifted = i128::from_le_bytes(buf) >> shift;
             shifted.to_le_bytes()
         }
         BinOp::Shr | BinOp::ShrUnchecked => {
-            let val = u128::from_le_bytes(lhs_buf);
-            let shifted = val >> shift;
+            let shifted = lhs.read_uint() >> shift;
             shifted.to_le_bytes()
         }
         _ => unreachable!(),
@@ -574,7 +559,7 @@ pub(super) fn read_discriminant(enum_val: &Value, enum_ty: Ty) -> Result<Value> 
                 _ => bail!("Unexpected field shape for enum"),
             };
             let tag_bytes = &enum_val.as_bytes()[tag_off..tag_off + tag_sz];
-            let tag_val = read_uint(tag_bytes);
+            let tag_val = uint_from_bytes(tag_bytes);
 
             let TyKind::RigidTy(RigidTy::Adt(def, _)) = enum_ty.kind() else {
                 bail!("Expected ADT for discriminant read");
@@ -702,12 +687,6 @@ fn build_enum_variant(
 fn discr_value_to_bytes(val: u128, size: usize) -> Value {
     let bytes = val.to_le_bytes();
     Value::from_bytes(&bytes[..size])
-}
-
-fn read_uint(bytes: &[u8]) -> u128 {
-    let mut buf = [0u8; 16];
-    buf[..bytes.len()].copy_from_slice(bytes);
-    u128::from_le_bytes(buf)
 }
 
 fn write_uint(dest: &mut [u8], val: u128) {

@@ -3,7 +3,7 @@
 //! Validates that interpreter values satisfy Rust's type invariants before
 //! passing them to native code or after transmute operations.
 
-use crate::value::Value;
+use crate::value::{Value, uint_from_bytes};
 use anyhow::{Result, bail};
 use rustc_public::abi::{
     FieldsShape, Primitive, Scalar, TagEncoding, ValueAbi, VariantFields, VariantsShape,
@@ -211,7 +211,7 @@ fn active_variant_idx(
     encoding: &TagEncoding,
     tag_sz: usize,
 ) -> Option<VariantIdx> {
-    let tag_val = read_uint(&tag_bytes[..tag_sz]);
+    let tag_val = uint_from_bytes(&tag_bytes[..tag_sz]);
     match encoding {
         TagEncoding::Direct => Some(VariantIdx::to_val(tag_val as usize)),
         TagEncoding::Niche {
@@ -247,7 +247,7 @@ fn validate_scalar(bytes: &[u8], scalar: &Scalar, ty: &Ty) -> Result<()> {
         );
     }
 
-    let val = read_uint(&bytes[..size]);
+    let val = uint_from_bytes(&bytes[..size]);
 
     if !valid_range.contains(val) {
         let kind = match value {
@@ -270,10 +270,4 @@ fn scalar_size(scalar: &Scalar, target: &MachineInfo) -> usize {
         Scalar::Initialized { value, .. } | Scalar::Union { value } => *value,
     };
     prim.size(target).bytes()
-}
-
-fn read_uint(bytes: &[u8]) -> u128 {
-    let mut buf = [0u8; 16];
-    buf[..bytes.len()].copy_from_slice(bytes);
-    u128::from_le_bytes(buf)
 }

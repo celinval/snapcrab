@@ -264,15 +264,8 @@ impl FnInterpreter<'_> {
     /// Extract discriminant value from a Value as u128.
     ///
     /// Treats memory as unsigned integer of appropriate size.
-    fn discriminant_value(&self, value: &Value) -> Result<u128> {
-        Ok(match value.len() {
-            1 => value.as_type::<u8>().unwrap() as u128,
-            2 => value.as_type::<u16>().unwrap() as u128,
-            4 => value.as_type::<u32>().unwrap() as u128,
-            8 => value.as_type::<u64>().unwrap() as u128,
-            16 => value.as_type::<u128>().unwrap(),
-            _ => bail!("Cannot switch on value of size {}", value.len()),
-        })
+    fn discriminant_value(&self, value: &Value) -> u128 {
+        value.read_uint()
     }
 
     /// Executes a terminator instruction that ends a basic block.
@@ -297,7 +290,7 @@ impl FnInterpreter<'_> {
             TerminatorKind::Goto { target } => Ok(ControlFlow::Continue(target)),
             TerminatorKind::SwitchInt { discr, targets } => {
                 let discr_value = self.evaluate_operand(&discr)?;
-                let discr_int = self.discriminant_value(&discr_value)?;
+                let discr_int = self.discriminant_value(&discr_value);
 
                 // Find the target for this value
                 let target = targets
