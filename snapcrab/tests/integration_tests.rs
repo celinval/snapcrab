@@ -768,7 +768,6 @@ check_custom_start!(
 
 // Hello world test (exercises println! → fmt machinery → native calls)
 check_interpreter!(
-    #[ignore]
     test_hello_world,
     input = "hello_world.rs",
     result = TestResult::Success

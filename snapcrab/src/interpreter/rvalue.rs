@@ -175,6 +175,90 @@ fn eval_wide_ptr_binop(op: BinOp, l: &Value, r: &Value, operand_type: &RigidTy) 
     }
 }
 
+/// Returns true if the operation is a shift (Shl, Shr, or their unchecked variants).
+fn is_shift_op(op: &BinOp) -> bool {
+    matches!(
+        op,
+        BinOp::Shl | BinOp::Shr | BinOp::ShlUnchecked | BinOp::ShrUnchecked
+    )
+}
+
+/// Evaluate a shift operation.
+///
+/// For `Shl`/`Shr`, the shift amount is `RHS.rem_euclid(LHS::BITS)`.
+/// For `ShlUnchecked`/`ShrUnchecked`, it is UB if RHS >= LHS::BITS or RHS < 0.
+/// `Shr` on signed types is arithmetic (sign-extending).
+fn eval_shift(
+    op: &BinOp,
+    lhs: &Value,
+    rhs: &Value,
+    lhs_type: &RigidTy,
+    rhs_type: &RigidTy,
+) -> Result<Value> {
+    let lhs_bits = (lhs.len() * 8) as u32;
+    let is_signed_lhs = matches!(lhs_type, RigidTy::Int(_));
+    let is_signed_rhs = matches!(rhs_type, RigidTy::Int(_));
+
+    // Read RHS as i128 to detect negative shifts.
+    let rhs_val = if is_signed_rhs {
+        let mut buf = [0xFFu8; 16];
+        let bytes = rhs.as_bytes();
+        buf[..bytes.len()].copy_from_slice(bytes);
+        // Sign-extend: check high bit of the actual value
+        if bytes.last().is_some_and(|&b| b & 0x80 != 0) {
+            // Already sign-extended via 0xFF fill
+        } else {
+            buf = [0u8; 16];
+            buf[..bytes.len()].copy_from_slice(bytes);
+        }
+        i128::from_le_bytes(buf)
+    } else {
+        let mut buf = [0u8; 16];
+        let bytes = rhs.as_bytes();
+        buf[..bytes.len()].copy_from_slice(bytes);
+        u128::from_le_bytes(buf) as i128
+    };
+
+    let is_unchecked = matches!(op, BinOp::ShlUnchecked | BinOp::ShrUnchecked);
+    if is_unchecked && (rhs_val < 0 || rhs_val >= lhs_bits as i128) {
+        bail!(
+            "Undefined behavior: unchecked shift with amount {rhs_val} \
+             (valid range: 0..{lhs_bits})"
+        );
+    }
+
+    let shift = rhs_val.rem_euclid(lhs_bits as i128) as u32;
+
+    // Read LHS as u128 for shifting.
+    let mut lhs_buf = [0u8; 16];
+    lhs_buf[..lhs.len()].copy_from_slice(lhs.as_bytes());
+
+    let result_bytes = match op {
+        BinOp::Shl | BinOp::ShlUnchecked => {
+            let val = u128::from_le_bytes(lhs_buf);
+            let shifted = val << shift;
+            shifted.to_le_bytes()
+        }
+        BinOp::Shr | BinOp::ShrUnchecked if is_signed_lhs => {
+            // Arithmetic shift: sign-extend LHS to i128.
+            if lhs.as_bytes().last().is_some_and(|&b| b & 0x80 != 0) {
+                lhs_buf[lhs.len()..].fill(0xFF);
+            }
+            let val = i128::from_le_bytes(lhs_buf);
+            let shifted = val >> shift;
+            shifted.to_le_bytes()
+        }
+        BinOp::Shr | BinOp::ShrUnchecked => {
+            let val = u128::from_le_bytes(lhs_buf);
+            let shifted = val >> shift;
+            shifted.to_le_bytes()
+        }
+        _ => unreachable!(),
+    };
+
+    Ok(Value::from_bytes(&result_bytes[..lhs.len()]))
+}
+
 /// Evaluates a binary operation on boolean values.
 fn eval_bool_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value> {
     let left = l.as_bool().unwrap();
@@ -224,6 +308,13 @@ impl<'a> FnInterpreter<'a> {
     /// * `Err(anyhow::Error)` - If evaluation fails or rvalue type is unsupported
     pub(super) fn evaluate_rvalue(&self, rvalue: &Rvalue) -> Result<Value> {
         match rvalue {
+            Rvalue::BinaryOp(op, left, right) if is_shift_op(op) => {
+                let left_val = self.evaluate_operand(left)?;
+                let right_val = self.evaluate_operand(right)?;
+                let lhs_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
+                let rhs_type = right.ty(self.locals())?.kind().rigid().unwrap().clone();
+                eval_shift(op, &left_val, &right_val, &lhs_type, &rhs_type)
+            }
             Rvalue::BinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;
                 let right_val = self.evaluate_operand(right)?;
@@ -258,6 +349,22 @@ impl<'a> FnInterpreter<'a> {
                 let value = self.evaluate_operand(operand)?;
                 let source_ty = operand.ty(self.locals())?;
                 self.perform_cast(cast_kind, value, source_ty, *target_ty)
+            }
+            Rvalue::CheckedBinaryOp(op, left, right) if is_shift_op(op) => {
+                let left_val = self.evaluate_operand(left)?;
+                let right_val = self.evaluate_operand(right)?;
+                let lhs_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
+                let rhs_type = right.ty(self.locals())?.kind().rigid().unwrap().clone();
+                let result_ty = rvalue.ty(self.locals())?;
+                match eval_shift(op, &left_val, &right_val, &lhs_type, &rhs_type) {
+                    Ok(val) => {
+                        Value::from_tuple_with_layout(&[val, Value::from_bool(false)], result_ty)
+                    }
+                    Err(_) => {
+                        let zero = Value::with_size(left_val.len());
+                        Value::from_tuple_with_layout(&[zero, Value::from_bool(true)], result_ty)
+                    }
+                }
             }
             Rvalue::CheckedBinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;
@@ -972,5 +1079,159 @@ mod tests {
                 .unwrap(),
             Value::from_bool(true)
         );
+    }
+
+    // --- Shift operation tests ---
+
+    trait AsRigidTy {
+        fn rigid_ty() -> RigidTy;
+    }
+
+    macro_rules! impl_as_rigid_ty {
+        ($($rust_ty:ty => $rigid:expr),* $(,)?) => {
+            $(impl AsRigidTy for $rust_ty {
+                fn rigid_ty() -> RigidTy { $rigid }
+            })*
+        };
+    }
+
+    impl_as_rigid_ty! {
+        u8 => RigidTy::Uint(UintTy::U8),
+        u16 => RigidTy::Uint(UintTy::U16),
+        u32 => RigidTy::Uint(UintTy::U32),
+        u64 => RigidTy::Uint(UintTy::U64),
+        u128 => RigidTy::Uint(UintTy::U128),
+        usize => RigidTy::Uint(UintTy::Usize),
+        i8 => RigidTy::Int(IntTy::I8),
+        i16 => RigidTy::Int(IntTy::I16),
+        i32 => RigidTy::Int(IntTy::I32),
+        i64 => RigidTy::Int(IntTy::I64),
+        i128 => RigidTy::Int(IntTy::I128),
+        isize => RigidTy::Int(IntTy::Isize),
+    }
+
+    fn check_shift<L, R>(op: BinOp, lhs: L, rhs: R, expected: Result<L, ()>)
+    where
+        L: IntoBytes + FromBytes + Immutable + AsRigidTy + PartialEq + std::fmt::Debug,
+        R: IntoBytes + FromBytes + Immutable + AsRigidTy,
+    {
+        let lhs_val = Value::from_type(lhs);
+        let rhs_val = Value::from_type(rhs);
+        let result = eval_shift(&op, &lhs_val, &rhs_val, &L::rigid_ty(), &R::rigid_ty());
+        match expected {
+            Ok(expected_val) => {
+                let result = result.expect("shift should succeed");
+                let actual = result.as_type::<L>().expect("result type mismatch");
+                assert_eq!(
+                    actual, expected_val,
+                    "shift({op:?}, {lhs_val:?}, {rhs_val:?})"
+                );
+            }
+            Err(()) => {
+                assert!(
+                    result.is_err(),
+                    "shift({op:?}, {lhs_val:?}, {rhs_val:?}) should fail"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_shl_basic() {
+        check_shift(BinOp::Shl, 1u64, 3i32, Ok(8u64));
+        check_shift(BinOp::Shl, 1u8, 7u32, Ok(128u8));
+        check_shift(BinOp::Shl, 5u32, 0i32, Ok(5u32));
+    }
+
+    #[test]
+    fn test_shr_basic() {
+        check_shift(BinOp::Shr, 0xFFu8, 4i32, Ok(0x0Fu8));
+        check_shift(BinOp::Shr, 1024u64, 3u32, Ok(128u64));
+        check_shift(BinOp::Shr, 1u32, 0i32, Ok(1u32));
+    }
+
+    #[test]
+    fn test_shr_arithmetic_signed() {
+        check_shift(BinOp::Shr, -16i32, 2u32, Ok(-4i32));
+        check_shift(BinOp::Shr, -1i8, 4u32, Ok(-1i8));
+        check_shift(BinOp::Shr, -128i8, 7u32, Ok(-1i8));
+    }
+
+    #[test]
+    fn test_shl_wrapping() {
+        check_shift(BinOp::Shl, 1u8, 8i32, Ok(1u8));
+        check_shift(BinOp::Shl, 1u8, 9i32, Ok(2u8));
+        check_shift(BinOp::Shl, 1u32, 32i32, Ok(1u32));
+        check_shift(BinOp::Shl, 1u64, 65i32, Ok(2u64));
+    }
+
+    #[test]
+    fn test_shr_wrapping() {
+        check_shift(BinOp::Shr, 0x80u8, 8i32, Ok(0x80u8));
+        check_shift(BinOp::Shr, 0x80u8, 9i32, Ok(0x40u8));
+        check_shift(BinOp::Shr, 0xFFFF_FFFFu32, 32i32, Ok(0xFFFF_FFFFu32));
+        check_shift(BinOp::Shr, 0xFFFF_FFFFu32, 33i32, Ok(0x7FFF_FFFFu32));
+    }
+
+    #[test]
+    fn test_shl_negative_rhs_wraps() {
+        check_shift(BinOp::Shl, 1u8, -1i32, Ok(128u8));
+        check_shift(BinOp::Shl, 1u8, -2i32, Ok(64u8));
+        check_shift(BinOp::Shl, 1u64, -1i32, Ok(1u64 << 63));
+    }
+
+    #[test]
+    fn test_shr_negative_rhs_wraps() {
+        check_shift(BinOp::Shr, 128u8, -1i32, Ok(1u8));
+        check_shift(BinOp::Shr, 0x8000_0000u32, -3i32, Ok(4u32));
+    }
+
+    #[test]
+    fn test_shr_signed_negative_rhs_wraps() {
+        check_shift(BinOp::Shr, -128i8, -1i32, Ok(-1i8));
+    }
+
+    #[test]
+    fn test_shift_large_overflow_wraps() {
+        check_shift(BinOp::Shl, 1u8, 256i32, Ok(1u8));
+        check_shift(BinOp::Shl, 1u8, 257i32, Ok(2u8));
+        check_shift(BinOp::Shl, 1u32, 1000i32, Ok(1u32 << 8));
+    }
+
+    #[test]
+    fn test_shl_unchecked_valid() {
+        check_shift(BinOp::ShlUnchecked, 1u64, 3i32, Ok(8u64));
+        check_shift(BinOp::ShlUnchecked, 1u8, 7i32, Ok(128u8));
+    }
+
+    #[test]
+    fn test_shl_unchecked_ub_overflow() {
+        check_shift(BinOp::ShlUnchecked, 1u8, 8i32, Err(()));
+        check_shift(BinOp::ShlUnchecked, 1u32, 32i32, Err(()));
+    }
+
+    #[test]
+    fn test_shl_unchecked_ub_negative() {
+        check_shift(BinOp::ShlUnchecked, 1u8, -1i32, Err(()));
+        check_shift(BinOp::ShrUnchecked, 1u64, -5i32, Err(()));
+    }
+
+    #[test]
+    fn test_shift_different_rhs_types() {
+        check_shift(BinOp::Shl, 1u64, 3u8, Ok(8u64));
+        check_shift(BinOp::Shl, 1u64, 3u16, Ok(8u64));
+        check_shift(BinOp::Shl, 1u64, 3u32, Ok(8u64));
+        check_shift(BinOp::Shl, 1u64, 3i32, Ok(8u64));
+        check_shift(BinOp::Shl, 1u64, 3i64, Ok(8u64));
+    }
+
+    #[test]
+    fn test_shift_different_lhs_types() {
+        check_shift(BinOp::Shl, 1u8, 2i32, Ok(4u8));
+        check_shift(BinOp::Shl, 1u16, 2i32, Ok(4u16));
+        check_shift(BinOp::Shl, 1u32, 2i32, Ok(4u32));
+        check_shift(BinOp::Shl, 1u64, 2i32, Ok(4u64));
+        check_shift(BinOp::Shl, 1u128, 2i32, Ok(4u128));
+        check_shift(BinOp::Shl, 1usize, 2i32, Ok(4usize));
     }
 }
