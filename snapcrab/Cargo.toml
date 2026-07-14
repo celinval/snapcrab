@@ -29,17 +29,17 @@ name = "snapcrab"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "4.0", features = ["derive"] }
-libc = "0.2"
-zerocopy = "0.8.27"
-smallvec = { version = "1.0", features = ["const_new"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-num-traits = "0.2.19"
+anyhow.workspace = true
+clap.workspace = true
+libc.workspace = true
+num-traits.workspace = true
+smallvec.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+zerocopy.workspace = true
 
 [dev-dependencies]
-regex = "1.0"
+regex.workspace = true
 
 [package.metadata.rust-analyzer]
 # This crate uses #[feature(rustc_private)].
