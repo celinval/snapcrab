@@ -7,12 +7,10 @@
 //! - The std library linked into the compiler process uses the same ABI
 //! - The same rustc produced both the MIR and the native code
 //!
-//! The call uses an inline assembly trampoline that loads all argument
-//! registers and calls the target. Since the trampoline is a normal Rust
-//! frame with compiler-generated unwind info, panic unwinding propagates
-//! correctly.
+//! The call uses a cranelift JIT'd trampoline that loads typed arguments
+//! and calls the target with the correct ABI.
 
-mod jit;
+pub mod jit;
 
 use crate::interpreter::check::{CheckConfig, validate_value};
 use crate::value::Value;
@@ -25,7 +23,12 @@ use tracing::debug;
 ///
 /// Validates argument values before the call to prevent UB from invalid
 /// values crossing the native boundary.
-pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> Result<Value> {
+pub fn call_native(
+    instance: Instance,
+    args: &[Value],
+    config: &CheckConfig,
+    jit: &jit::JitEngine,
+) -> Result<Value> {
     let mangled = instance.mangled_name();
     let name = instance.name();
     debug!("Native call: {name} ({mangled})");
@@ -50,7 +53,7 @@ pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> 
     }
 
     // Call via JIT'd trampoline.
-    jit::call_native(fn_ptr.cast(), &fn_abi, args, &name)
+    jit.call_native(fn_ptr.cast(), &fn_abi, args, &name)
 }
 
 /// Log detailed ABI information for a native call.

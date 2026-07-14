@@ -7,6 +7,6 @@
 pub mod check;
 pub mod function;
 mod intrinsics;
-mod native;
+pub mod native;
 mod place;
 mod rvalue;

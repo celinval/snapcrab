@@ -13,6 +13,7 @@ mod stack;
 mod statics;
 
 use crate::interpreter::check::CheckConfig;
+use crate::interpreter::native::jit::JitEngine;
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::Result;
@@ -35,7 +36,6 @@ pub fn pointer_width() -> usize {
 /// Thread-local memory representation.
 ///
 /// This is the main structure exported to the rest of the interpreter.
-#[derive(Default)]
 pub struct ThreadMemory {
     stack: Stack,
     #[allow(unused)]
@@ -43,6 +43,20 @@ pub struct ThreadMemory {
     statics: Statics,
     /// Configuration for which UB checks to perform.
     pub check_config: CheckConfig,
+    /// JIT engine for native function calls.
+    pub jit: JitEngine,
+}
+
+impl Default for ThreadMemory {
+    fn default() -> Self {
+        Self {
+            stack: Stack::default(),
+            heap: Heap::default(),
+            statics: Statics::default(),
+            check_config: CheckConfig::default(),
+            jit: JitEngine::new().expect("Failed to initialize JIT engine"),
+        }
+    }
 }
 
 impl ThreadMemory {

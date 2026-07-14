@@ -77,8 +77,9 @@ pub fn invoke_fn(
 
     // Tier 3: native call via dlsym
     let config = memory.check_config.clone();
+    let jit = &memory.jit;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::native::call_native(instance, &args, &config)
+        super::native::call_native(instance, &args, &config, jit)
     }));
     match result {
         Ok(val) => val,
