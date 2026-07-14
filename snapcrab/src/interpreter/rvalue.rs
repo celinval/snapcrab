@@ -303,23 +303,9 @@ impl<'a> FnInterpreter<'a> {
                 op.eval(&val, result_type)
             }
             Rvalue::Use(operand) => self.evaluate_operand(operand),
-            Rvalue::Ref(_, _, place) => {
+            Rvalue::Ref(_, _, place) | Rvalue::AddressOf(_, place) => {
                 let ty = rvalue.ty(self.locals())?;
-                if ty.is_wide_ptr() {
-                    self.read_wide_ptr_from_place(place)
-                } else {
-                    let address = self.resolve_place_addr(place)?;
-                    Ok(Value::from_type(address))
-                }
-            }
-            Rvalue::AddressOf(_, place) => {
-                let ty = rvalue.ty(self.locals())?;
-                if ty.is_wide_ptr() {
-                    self.read_wide_ptr_from_place(place)
-                } else {
-                    let address = self.resolve_place_addr(place)?;
-                    Ok(Value::from_type(address))
-                }
+                self.place_to_ptr(place, ty)
             }
             Rvalue::Cast(cast_kind, operand, target_ty) => {
                 let value = self.evaluate_operand(operand)?;
@@ -502,11 +488,40 @@ fn perform_unsized_coercion(value: Value, src_ptr_ty: Ty, dst_ptr_ty: Ty) -> Res
         let len = len_const.eval_target_usize()? as usize;
 
         Ok(Value::new_wide_ptr(data_ptr, len))
+    } else if dst_pointee_kind.is_struct() {
+        // Container coercion: &Struct<[T; N]> -> &Struct<[T]>
+        // The data pointer stays the same; we extract the array length from the
+        // source type's unsized tail and use it as slice metadata.
+        let data_ptr = value.as_type::<usize>().context("Expected pointer value")?;
+        let metadata = extract_unsized_metadata(src_pointee_kind)?;
+        Ok(Value::new_wide_ptr(data_ptr, metadata))
     } else {
-        // TODO: support container coercion (e.g., &Wrapper<[u8; N]> -> &Wrapper<[u8]>)
-        // and trait object coercion (e.g., &Wrapper<T> -> &Wrapper<dyn Trait>).
-        // See test_wrapper_slice_len, test_wrapper_dyn_debug.
+        // TODO: support trait object coercion (e.g., &T -> &dyn Trait).
+        // See test_wrapper_dyn_debug.
         bail!("Unsupported coercion {src_ptr_ty} -> {dst_ptr_ty}")
+    }
+}
+
+/// Extract the metadata for an unsized coercion from the source type.
+///
+/// For container coercion (e.g., Wrapper<[T; N]> → Wrapper<[T]>), this walks
+/// the struct to find the sized tail (an array) and returns its length.
+fn extract_unsized_metadata(src_pointee_kind: TyKind) -> Result<usize> {
+    match src_pointee_kind {
+        TyKind::RigidTy(RigidTy::Array(_, len_const)) => {
+            Ok(len_const.eval_target_usize()? as usize)
+        }
+        TyKind::RigidTy(RigidTy::Adt(def, ref args)) => {
+            // The unsized tail is the last field. Recurse into it.
+            let variants = def.variants();
+            let fields = variants[0].fields();
+            let last_field = fields
+                .last()
+                .context("Expected at least one field in container struct")?;
+            let field_ty = last_field.ty_with_args(args);
+            extract_unsized_metadata(field_ty.kind())
+        }
+        _ => bail!("Cannot extract unsized metadata from {src_pointee_kind:?}"),
     }
 }
 

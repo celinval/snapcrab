@@ -80,3 +80,55 @@ pub fn test_wrapper_dyn_debug() {
     let w_ref: &Wrapper<dyn Debug> = &w;
     let _ = &w_ref.value;
 }
+
+// --- Multi-field container with unsized tail ---
+
+struct Msg<T: ?Sized> {
+    msg_type: u32,
+    len: u32,
+    buf: T,
+}
+
+/// Coerce &Msg<[u8; 4]> to &Msg<[u8]>, then access both sized and unsized fields.
+pub fn test_msg_coerce_access_both() {
+    let msg = Msg {
+        msg_type: 7,
+        len: 4,
+        buf: [10u8, 20, 30, 40],
+    };
+    let msg_ref: &Msg<[u8]> = &msg;
+
+    // Access sized fields.
+    assert!(msg_ref.msg_type == 7);
+    assert!(msg_ref.len == 4);
+
+    // Access unsized field.
+    assert!(msg_ref.buf.len() == 4);
+    assert!(msg_ref.buf[0] == 10);
+    assert!(msg_ref.buf[3] == 40);
+}
+
+/// Take a reference to the sized field from an unsized container.
+pub fn test_msg_sized_field_ref() {
+    let msg = Msg {
+        msg_type: 99,
+        len: 2,
+        buf: [1u8, 2],
+    };
+    let msg_ref: &Msg<[u8]> = &msg;
+    let type_ref: &u32 = &msg_ref.msg_type;
+    assert!(*type_ref == 99);
+}
+
+/// Take a reference to the unsized field.
+pub fn test_msg_unsized_field_ref() {
+    let msg = Msg {
+        msg_type: 1,
+        len: 3,
+        buf: [5u8, 6, 7],
+    };
+    let msg_ref: &Msg<[u8]> = &msg;
+    let slice: &[u8] = &msg_ref.buf;
+    assert!(slice.len() == 3);
+    assert!(slice[1] == 6);
+}

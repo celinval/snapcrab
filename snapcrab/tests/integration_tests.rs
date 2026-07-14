@@ -737,7 +737,7 @@ check_custom_start!(
     test_struct_array_to_slice,
     input = "unsized_coercion.rs",
     start_fn = "struct_array_to_slice",
-    result = TestResult::ErrorRegex(r".*Unsupported coercion.*Container.*".to_string())
+    result = TestResult::SuccessWithValue(vec![3, 0, 0, 0, 0, 0, 0, 0])
 );
 
 // Static data / constant provenance tests
@@ -802,28 +802,24 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_wrapper_slice_len,
     input = "wide_ptr.rs",
     start_fn = "test_wrapper_slice_len",
 );
 
 check_custom_start!(
-    #[ignore]
     test_wrapper_slice_elements,
     input = "wide_ptr.rs",
     start_fn = "test_wrapper_slice_elements",
 );
 
 check_custom_start!(
-    #[ignore]
     test_wrapper_field_ref,
     input = "wide_ptr.rs",
     start_fn = "test_wrapper_field_ref",
 );
 
 check_custom_start!(
-    #[ignore]
     test_wrapper_field_raw_ptr,
     input = "wide_ptr.rs",
     start_fn = "test_wrapper_field_raw_ptr",
@@ -834,6 +830,24 @@ check_custom_start!(
     test_wrapper_dyn_debug,
     input = "wide_ptr.rs",
     start_fn = "test_wrapper_dyn_debug",
+);
+
+check_custom_start!(
+    test_msg_coerce_access_both,
+    input = "wide_ptr.rs",
+    start_fn = "test_msg_coerce_access_both",
+);
+
+check_custom_start!(
+    test_msg_sized_field_ref,
+    input = "wide_ptr.rs",
+    start_fn = "test_msg_sized_field_ref",
+);
+
+check_custom_start!(
+    test_msg_unsized_field_ref,
+    input = "wide_ptr.rs",
+    start_fn = "test_msg_unsized_field_ref",
 );
 
 // Panic handling tests (exercises native call path via unwrap_failed)

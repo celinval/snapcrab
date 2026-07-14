@@ -20,6 +20,9 @@ struct PlaceState {
     ty: Ty,
     /// Active variant after a Downcast projection; cleared after Field use.
     downcast: Option<VariantIdx>,
+    /// Pointer metadata from derefing a wide pointer. Preserved through Field
+    /// projections since the unsized tail's metadata is the container's metadata.
+    metadata: Option<Value>,
 }
 
 impl<'a> function::FnInterpreter<'a> {
@@ -33,19 +36,39 @@ impl<'a> function::FnInterpreter<'a> {
 
     /// Resolves a place to the address of the actual value.
     pub(super) fn resolve_place_addr(&self, place: &Place) -> Result<usize> {
+        Ok(self.resolve_place(place)?.addr)
+    }
+
+    /// Resolve a place to its address and optional wide pointer metadata.
+    fn resolve_place(&self, place: &Place) -> Result<PlaceState> {
         let initial_addr = self.memory.local_address(place.local)?;
         let initial_ty = self.locals()[place.local].ty;
 
-        let state = place.projection.iter().try_fold(
+        place.projection.iter().try_fold(
             PlaceState {
                 addr: initial_addr,
                 ty: initial_ty,
                 downcast: None,
+                metadata: None,
             },
             |state, projection| self.apply_projection(state, projection),
-        )?;
+        )
+    }
 
-        Ok(state.addr)
+    /// Resolve a place and construct a pointer value (thin or wide).
+    pub(super) fn place_to_ptr(&self, place: &Place, result_ty: Ty) -> Result<Value> {
+        let state = self.resolve_place(place)?;
+        if result_ty.is_wide_ptr() {
+            let metadata = state.metadata.context(
+                "Expected metadata for wide pointer, but place resolved without metadata",
+            )?;
+            Ok(Value::new_wide_ptr(
+                state.addr,
+                metadata.read_uint() as usize,
+            ))
+        } else {
+            Ok(Value::from_type(state.addr))
+        }
     }
 
     fn apply_projection(
@@ -57,6 +80,7 @@ impl<'a> function::FnInterpreter<'a> {
             addr: current_addr,
             ty: current_ty,
             downcast,
+            metadata,
         } = state;
         match projection {
             ProjectionElem::Deref => {
@@ -67,17 +91,25 @@ impl<'a> function::FnInterpreter<'a> {
                 };
 
                 let ptr_value = self.memory.read_addr(current_addr, current_ty)?;
+
+                // Extract metadata if this is a wide pointer deref.
+                let new_metadata = if current_ty.is_wide_ptr() {
+                    Some(ptr_value.ptr_metadata()?)
+                } else {
+                    None
+                };
+
                 let address = ptr_value.to_data_addr()?.as_type::<usize>().unwrap();
 
                 Ok(PlaceState {
                     addr: address,
                     ty: pointee_ty,
                     downcast: None,
+                    metadata: new_metadata,
                 })
             }
             ProjectionElem::Field(field_idx, field_ty) => {
                 let field_offset = if let Some(variant_idx) = downcast {
-                    // After Downcast: use variant-specific field offsets
                     let layout = current_ty.layout()?;
                     let shape = layout.shape();
                     match &shape.variants {
@@ -95,21 +127,18 @@ impl<'a> function::FnInterpreter<'a> {
                                 })?
                                 .bytes()
                         }
-                        VariantsShape::Single { .. } => {
-                            // Single variant: use top-level fields
-                            match &shape.fields {
-                                rustc_public::abi::FieldsShape::Arbitrary { offsets } => offsets
-                                    .get(*field_idx)
-                                    .with_context(|| {
-                                        format!("Field index {} out of bounds", field_idx)
-                                    })?
-                                    .bytes(),
-                                _ => bail!(
-                                    "Unsupported field layout for single-variant: {:?}",
-                                    current_ty
-                                ),
-                            }
-                        }
+                        VariantsShape::Single { .. } => match &shape.fields {
+                            rustc_public::abi::FieldsShape::Arbitrary { offsets } => offsets
+                                .get(*field_idx)
+                                .with_context(|| {
+                                    format!("Field index {} out of bounds", field_idx)
+                                })?
+                                .bytes(),
+                            _ => bail!(
+                                "Unsupported field layout for single-variant: {:?}",
+                                current_ty
+                            ),
+                        },
                         _ => bail!("Unsupported variant shape for Downcast"),
                     }
                 } else {
@@ -123,16 +152,26 @@ impl<'a> function::FnInterpreter<'a> {
                         _ => bail!("Unsupported field layout for type: {:?}", current_ty),
                     }
                 };
+                // Preserve metadata only when accessing an unsized field
+                // (the unsized tail). For sized fields, metadata is irrelevant.
+                let is_unsized = field_ty.layout().map_or(true, |l| l.shape().is_unsized());
+                let field_metadata = if metadata.is_some() && is_unsized {
+                    metadata
+                } else {
+                    None
+                };
                 Ok(PlaceState {
                     addr: current_addr + field_offset,
                     ty: *field_ty,
                     downcast: None,
+                    metadata: field_metadata,
                 })
             }
             ProjectionElem::Downcast(variant_idx) => Ok(PlaceState {
                 addr: current_addr,
                 ty: current_ty,
                 downcast: Some(*variant_idx),
+                metadata,
             }),
             ProjectionElem::Index(local) => {
                 let index_value = self.memory.read_local(*local, Ty::usize_ty())?;
@@ -159,6 +198,7 @@ impl<'a> function::FnInterpreter<'a> {
                     addr: current_addr + index * stride,
                     ty: element_ty,
                     downcast: None,
+                    metadata: None,
                 })
             }
             _ => bail!("Unsupported place projection: {projection:?}"),
@@ -174,27 +214,5 @@ impl<'a> function::FnInterpreter<'a> {
 
         let addr = self.resolve_place_addr(place)?;
         self.memory.read_addr(addr, place_ty)
-    }
-
-    /// Read a wide pointer for a place that dereferences a wide pointer.
-    ///
-    /// For a place like `*_1` where `_1: &str`, this reads the full 16-byte
-    /// wide pointer from `_1` rather than just computing the data address.
-    pub(super) fn read_wide_ptr_from_place(&self, place: &Place) -> Result<Value> {
-        // The place must be exactly `Deref` of a wide pointer local (no
-        // additional projections). More complex patterns would require
-        // reconstructing the metadata from subslice/index projections.
-        if place.projection.len() == 1 && matches!(place.projection[0], ProjectionElem::Deref) {
-            let ptr_ty = self.locals()[place.local].ty;
-            let addr = self.memory.local_address(place.local)?;
-            return self.memory.read_addr(addr, ptr_ty);
-        }
-        // TODO: support multi-projection wide pointer places (e.g., &(*w).field
-        // where w: &Wrapper<[u8]>). Requires reconstructing metadata from the
-        // container's unsized field. See test_wrapper_field_ref, test_wrapper_field_raw_ptr.
-        bail!(
-            "Unsupported wide pointer place: expected simple Deref, got {} projections",
-            place.projection.len()
-        )
     }
 }
