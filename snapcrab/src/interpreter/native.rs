@@ -12,18 +12,11 @@
 //! frame with compiler-generated unwind info, panic unwinding propagates
 //! correctly.
 
-#[cfg(all(target_arch = "x86_64", unix))]
-mod x86_64;
-#[cfg(all(target_arch = "x86_64", unix))]
-use x86_64 as platform;
-
-#[cfg(not(all(target_arch = "x86_64", unix)))]
-use unsupported as platform;
+mod jit;
 
 use crate::interpreter::check::{CheckConfig, validate_value};
 use crate::value::Value;
 use anyhow::{Result, bail};
-use rustc_public::abi::{Primitive, Scalar, ValueAbi};
 use rustc_public::mir::mono::Instance;
 use std::ffi::CString;
 use tracing::debug;
@@ -56,8 +49,8 @@ pub fn call_native(instance: Instance, args: &[Value], config: &CheckConfig) -> 
         bail!("Failed to invoke `{name}`: symbol `{symbol_name}` not found in current process");
     }
 
-    // Delegate to platform-specific calling convention handler.
-    platform::call(fn_ptr.cast(), &fn_abi, args, &name)
+    // Call via JIT'd trampoline.
+    jit::call_native(fn_ptr.cast(), &fn_abi, args, &name)
 }
 
 /// Log detailed ABI information for a native call.
@@ -79,39 +72,4 @@ fn debug_fn_abi(
         debug!("  arg[{i}]: mode={:?}, ty={}", arg_abi.mode, arg_abi.ty);
     }
     debug!("  ret: mode={:?}, ty={}", fn_abi.ret.mode, fn_abi.ret.ty);
-}
-
-/// Check if a ValueAbi represents a float type.
-fn is_float_abi(abi: &ValueAbi) -> bool {
-    match abi {
-        ValueAbi::Scalar(scalar) => is_float_scalar(scalar),
-        _ => false,
-    }
-}
-
-/// Check if a Scalar represents a float primitive.
-fn is_float_scalar(scalar: &Scalar) -> bool {
-    let prim = match scalar {
-        Scalar::Initialized { value, .. } | Scalar::Union { value } => *value,
-    };
-    matches!(prim, Primitive::Float { .. })
-}
-
-#[cfg(not(all(target_arch = "x86_64", unix)))]
-mod unsupported {
-    use crate::value::Value;
-    use anyhow::{Result, bail};
-    use rustc_public::abi::FnAbi;
-
-    pub fn call(
-        _fn_ptr: *const (),
-        _fn_abi: &FnAbi,
-        _args: &[Value],
-        fn_name: &str,
-    ) -> Result<Value> {
-        bail!(
-            "Failed to invoke `{fn_name}`: native calls are not supported on this platform \
-             (only x86-64 Unix is currently supported)"
-        )
-    }
 }

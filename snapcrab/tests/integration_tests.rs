@@ -767,7 +767,6 @@ check_custom_start!(
 );
 
 // Hello world test (exercises println! → fmt machinery → native calls)
-#[cfg(all(target_arch = "x86_64", unix))]
 check_interpreter!(
     test_hello_world,
     input = "hello_world.rs",
@@ -775,7 +774,6 @@ check_interpreter!(
 );
 
 // Native call tests (exercises the trampoline path via extern functions)
-#[cfg(all(target_arch = "x86_64", unix))]
 check_custom_start!(test_libc_abs, input = "libc_call.rs", start_fn = "test_abs",);
 
 // Wide pointer tests
@@ -890,7 +888,6 @@ check_custom_start!(
 );
 
 // Panic handling tests (exercises native call path via unwrap_failed)
-#[cfg(all(target_arch = "x86_64", unix))]
 check_custom_start!(
     test_unwrap_none_panics,
     input = "unwrap_panic.rs",
