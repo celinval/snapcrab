@@ -30,6 +30,11 @@ Currently, only **Unix x86-64** (the x86-64 System V ABI) is supported for nativ
 calls. The inline assembly trampolines are platform-specific, and other
 architectures (e.g., aarch64) would require equivalent implementations.
 
+On unsupported platforms, the interpreter still works for code whose call graph
+has MIR bodies available (most pure-Rust code). Only calls to pre-compiled
+functions without MIR (some std internals, `extern "C"` FFI) will fail with a
+runtime error.
+
 ### x86-64 System V calling convention
 
 This section summarizes the calling convention as defined by the

@@ -99,14 +99,19 @@ fn is_float_scalar(scalar: &Scalar) -> bool {
 
 #[cfg(not(all(target_arch = "x86_64", unix)))]
 mod unsupported {
-    use super::*;
+    use crate::value::Value;
+    use anyhow::{Result, bail};
+    use rustc_public::abi::FnAbi;
 
-    pub(crate) fn call(
-        _fn_ptr: *const libc::c_void,
-        _fn_abi: &FunctionAbi,
+    pub fn call(
+        _fn_ptr: *const (),
+        _fn_abi: &FnAbi,
         _args: &[Value],
-        _name: &str,
-    ) -> Result<Value, InterpreterError> {
-        const _: () = panic!("This platform is currently unsupported");
+        fn_name: &str,
+    ) -> Result<Value> {
+        bail!(
+            "Failed to invoke `{fn_name}`: native calls are not supported on this platform \
+             (only x86-64 Unix is currently supported)"
+        )
     }
 }

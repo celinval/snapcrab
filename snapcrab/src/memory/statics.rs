@@ -93,9 +93,8 @@ impl Statics {
     }
 }
 
-// SAFETY: Allocations are stored in Vec<u8> that are never moved or reallocated
-// after creation (we only push to the Vec of allocations, never remove or resize
-// individual entries). The sanitizer tracks their addresses for bounds checking.
+// SAFETY: Allocations are stored in Box<[u8]> that are never moved or reallocated
+// after creation. The sanitizer tracks their addresses for bounds checking.
 unsafe impl MemorySegment for Statics {
     fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError> {
         let inner = self.inner.borrow();

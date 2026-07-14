@@ -7,6 +7,7 @@ An experimental Rust interpreter designed to speed up local development by execu
 
 - **Little-endian host machine** (e.g., x86-64, AArch64). SnapCrab cannot be built on big-endian hosts.
 - **Matching target**: The interpreted code must target the same machine as the host. Cross-interpretation (e.g., interpreting 32-bit code on a 64-bit host) is not supported.
+- **Native call support**: On x86-64 Unix, the interpreter can call pre-compiled functions (some std internals, `extern "C"` functions) that lack MIR bodies. On other architectures (e.g., AArch64), these calls produce a runtime error — most pure-Rust code still works since it has MIR bodies available.
 
 ## Goals
 
