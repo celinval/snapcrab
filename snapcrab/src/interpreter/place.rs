@@ -201,7 +201,84 @@ impl<'a> function::FnInterpreter<'a> {
                     metadata: None,
                 })
             }
-            _ => bail!("Unsupported place projection: {projection:?}"),
+            ProjectionElem::ConstantIndex {
+                offset,
+                min_length: _,
+                from_end,
+            } => {
+                let (element_ty, stride) = self.element_ty_and_stride(current_ty)?;
+
+                let index = if *from_end {
+                    // Index from end: need the actual length.
+                    let len = self.array_or_slice_len(current_ty, &metadata)?;
+                    len - (*offset as usize)
+                } else {
+                    *offset as usize
+                };
+
+                Ok(PlaceState {
+                    addr: current_addr + index * stride,
+                    ty: element_ty,
+                    downcast: None,
+                    metadata: None,
+                })
+            }
+            ProjectionElem::Subslice { from, to, from_end } => {
+                let (element_ty, stride) = self.element_ty_and_stride(current_ty)?;
+                let new_addr = current_addr + (*from as usize) * stride;
+
+                let new_len = if *from_end {
+                    // slice[from..len - to]
+                    let len = self.array_or_slice_len(current_ty, &metadata)?;
+                    len - (*from as usize) - (*to as usize)
+                } else {
+                    // array[from..to]
+                    (*to as usize) - (*from as usize)
+                };
+
+                let slice_ty = Ty::from_rigid_kind(RigidTy::Slice(element_ty));
+                Ok(PlaceState {
+                    addr: new_addr,
+                    ty: slice_ty,
+                    downcast: None,
+                    metadata: Some(Value::from_type(new_len)),
+                })
+            }
+            ProjectionElem::OpaqueCast(ty) => Ok(PlaceState {
+                addr: current_addr,
+                ty: *ty,
+                downcast: None,
+                metadata,
+            }),
+        }
+    }
+
+    /// Get element type and stride for an array or slice type.
+    fn element_ty_and_stride(&self, ty: Ty) -> Result<(Ty, usize)> {
+        match ty.kind() {
+            TyKind::RigidTy(RigidTy::Array(elem_ty, _))
+            | TyKind::RigidTy(RigidTy::Slice(elem_ty)) => {
+                let elem_size = elem_ty.size()?;
+                Ok((elem_ty, elem_size))
+            }
+            _ => bail!("Expected array or slice type, got: {ty:?}"),
+        }
+    }
+
+    /// Get the length of an array or slice.
+    fn array_or_slice_len(&self, ty: Ty, metadata: &Option<Value>) -> Result<usize> {
+        match ty.kind() {
+            TyKind::RigidTy(RigidTy::Array(_, len_const)) => {
+                Ok(len_const.eval_target_usize()? as usize)
+            }
+            TyKind::RigidTy(RigidTy::Slice(_)) => {
+                let meta = metadata
+                    .as_ref()
+                    .context("Slice length requires metadata from wide pointer")?;
+                meta.as_type::<usize>()
+                    .context("Slice metadata should be usize")
+            }
+            _ => bail!("Expected array or slice type for length, got: {ty:?}"),
         }
     }
 

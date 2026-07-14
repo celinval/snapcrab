@@ -850,6 +850,43 @@ check_custom_start!(
     start_fn = "test_msg_unsized_field_ref",
 );
 
+// Slice pattern tests (ConstantIndex + Subslice projections)
+check_custom_start!(
+    test_constant_index,
+    input = "slice_patterns.rs",
+    start_fn = "test_constant_index",
+);
+
+check_custom_start!(
+    test_constant_index_from_end,
+    input = "slice_patterns.rs",
+    start_fn = "test_constant_index_from_end",
+);
+
+check_custom_start!(
+    test_subslice_array,
+    input = "slice_patterns.rs",
+    start_fn = "test_subslice_array",
+);
+
+check_custom_start!(
+    test_subslice_middle,
+    input = "slice_patterns.rs",
+    start_fn = "test_subslice_middle",
+);
+
+check_custom_start!(
+    test_slice_pattern_ref,
+    input = "slice_patterns.rs",
+    start_fn = "test_slice_pattern_ref",
+);
+
+check_custom_start!(
+    test_slice_from_end,
+    input = "slice_patterns.rs",
+    start_fn = "test_slice_from_end",
+);
+
 // Panic handling tests (exercises native call path via unwrap_failed)
 check_custom_start!(
     test_unwrap_none_panics,
