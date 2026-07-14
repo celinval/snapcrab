@@ -302,7 +302,7 @@ impl<'a> FnInterpreter<'a> {
                 let result_type = rvalue.ty(self.locals())?.kind().rigid().unwrap().clone();
                 op.eval(&val, result_type)
             }
-            Rvalue::Use(operand) => self.evaluate_operand(operand),
+            Rvalue::Use(operand, _) => self.evaluate_operand(operand),
             Rvalue::Ref(_, _, place) | Rvalue::AddressOf(_, place) => {
                 let ty = rvalue.ty(self.locals())?;
                 self.place_to_ptr(place, ty)
