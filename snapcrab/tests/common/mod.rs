@@ -6,7 +6,6 @@ extern crate rustc_middle;
 extern crate rustc_public;
 
 use std::path::Path;
-use std::process::ExitCode;
 
 #[derive(Debug)]
 pub enum TestResult {
@@ -45,13 +44,7 @@ pub fn run_interpreter_test(input_file: &Path) -> TestResult {
     // Use rustc_public to run the interpreter
     let result = rustc_public::run!(&rustc_args, || {
         match snapcrab::run_main(snapcrab::CheckConfig::default()) {
-            Ok(exit_code) => {
-                if exit_code == ExitCode::SUCCESS {
-                    std::ops::ControlFlow::Continue(())
-                } else {
-                    std::ops::ControlFlow::Continue(())
-                }
-            }
+            Ok(_) => std::ops::ControlFlow::Continue(()),
             Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
         }
     });
@@ -98,7 +91,7 @@ macro_rules! check_interpreter {
                 .join("inputs")
                 .join($input_file);
 
-            let result = crate::common::run_interpreter_test(&input_path);
+            let result = $crate::common::run_interpreter_test(&input_path);
             assert_eq!(result, $expected);
         }
     };
@@ -112,7 +105,7 @@ macro_rules! check_custom_start {
             $test_name,
             input = $input_file,
             start_fn = $start_fn,
-            result = crate::common::TestResult::Success
+            result = $crate::common::TestResult::Success
         );
     };
     ($(#[$attr:meta])* $test_name:ident, input=$input_file:expr, start_fn=$start_fn:expr, result=$expected:expr $(,)?) => {
@@ -124,7 +117,7 @@ macro_rules! check_custom_start {
                 .join("inputs")
                 .join($input_file);
 
-            let result = crate::common::run_custom_start_test(&input_path, $start_fn);
+            let result = $crate::common::run_custom_start_test(&input_path, $start_fn);
             assert_eq!(result, $expected);
         }
     };
