@@ -354,6 +354,17 @@ impl Value {
         uint_from_bytes(&self.data)
     }
 
+    /// Read value as i128, sign-extending if shorter than 16 bytes.
+    pub fn read_int(&self) -> i128 {
+        let mut buf = if self.sign_bit() {
+            [0xFFu8; 16]
+        } else {
+            [0u8; 16]
+        };
+        buf[..self.data.len()].copy_from_slice(&self.data);
+        i128::from_le_bytes(buf)
+    }
+
     /// Returns true if the most significant bit is set.
     pub fn sign_bit(&self) -> bool {
         self.data.last().is_some_and(|&b| b & 0x80 != 0)

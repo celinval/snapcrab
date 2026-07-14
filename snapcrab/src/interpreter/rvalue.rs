@@ -200,10 +200,8 @@ fn eval_shift(
     let is_signed_rhs = matches!(rhs_type, RigidTy::Int(_));
 
     // Read RHS as i128 to detect negative shifts.
-    let rhs_val = if is_signed_rhs && rhs.sign_bit() {
-        let mut buf = [0xFFu8; 16];
-        buf[..rhs.len()].copy_from_slice(rhs.as_bytes());
-        i128::from_le_bytes(buf)
+    let rhs_val = if is_signed_rhs {
+        rhs.read_int()
     } else {
         rhs.read_uint() as i128
     };
@@ -224,14 +222,7 @@ fn eval_shift(
             shifted.to_le_bytes()
         }
         BinOp::Shr | BinOp::ShrUnchecked if is_signed_lhs => {
-            // Arithmetic shift: sign-extend LHS to i128.
-            let mut buf = if lhs.sign_bit() {
-                [0xFFu8; 16]
-            } else {
-                [0u8; 16]
-            };
-            buf[..lhs.len()].copy_from_slice(lhs.as_bytes());
-            let shifted = i128::from_le_bytes(buf) >> shift;
+            let shifted = lhs.read_int() >> shift;
             shifted.to_le_bytes()
         }
         BinOp::Shr | BinOp::ShrUnchecked => {
@@ -341,15 +332,17 @@ impl<'a> FnInterpreter<'a> {
                 let lhs_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
                 let rhs_type = right.ty(self.locals())?.kind().rigid().unwrap().clone();
                 let result_ty = rvalue.ty(self.locals())?;
-                match eval_shift(op, &left_val, &right_val, &lhs_type, &rhs_type) {
-                    Ok(val) => {
-                        Value::from_tuple_with_layout(&[val, Value::from_bool(false)], result_ty)
-                    }
-                    Err(_) => {
-                        let zero = Value::with_size(left_val.len());
-                        Value::from_tuple_with_layout(&[zero, Value::from_bool(true)], result_ty)
-                    }
-                }
+                // Overflow means the shift amount >= BITS (before wrapping).
+                let lhs_bits = (left_val.len() * 8) as i128;
+                let is_signed_rhs = matches!(rhs_type, RigidTy::Int(_));
+                let rhs_val = if is_signed_rhs {
+                    right_val.read_int()
+                } else {
+                    right_val.read_uint() as i128
+                };
+                let overflow = rhs_val < 0 || rhs_val >= lhs_bits;
+                let shifted = eval_shift(op, &left_val, &right_val, &lhs_type, &rhs_type)?;
+                Value::from_tuple_with_layout(&[shifted, Value::from_bool(overflow)], result_ty)
             }
             Rvalue::CheckedBinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;
@@ -1212,5 +1205,33 @@ mod tests {
         check_shift(BinOp::Shl, 1u64, 2i32, Ok(4u64));
         check_shift(BinOp::Shl, 1u128, 2i32, Ok(4u128));
         check_shift(BinOp::Shl, 1usize, 2i32, Ok(4usize));
+    }
+
+    #[test]
+    fn test_shl_overflow_truncates() {
+        // Bits shifted out are discarded (wrapping behavior).
+        check_shift(BinOp::Shl, 128u8, 1i32, Ok(0u8));
+        check_shift(BinOp::Shl, 0xFFu8, 4i32, Ok(0xF0u8));
+        check_shift(BinOp::Shl, 0xFFFF_FFFFu32, 1i32, Ok(0xFFFF_FFFEu32));
+        // Signed: -1i8 << 1 = -2i8.
+        check_shift(BinOp::Shl, -1i8, 1u32, Ok(-2i8));
+        // Signed: -128i8 << 1 = 0 (high bit shifted out).
+        check_shift(BinOp::Shl, -128i8, 1u32, Ok(0i8));
+    }
+
+    #[test]
+    fn test_shift_large_unsigned_rhs() {
+        // u128::MAX as unsigned RHS: wraps via rem_euclid.
+        // u128::MAX % 8 = 7, so 1u8 << 7 = 128.
+        check_shift(BinOp::Shl, 1u8, u128::MAX, Ok(128u8));
+        // u128::MAX % 64 = 63, so 1u64 << 63.
+        check_shift(BinOp::Shl, 1u64, u128::MAX, Ok(1u64 << 63));
+    }
+
+    #[test]
+    fn test_shift_unchecked_large_unsigned_rhs() {
+        // u128::MAX as unsigned RHS should be UB (>= BITS) for unchecked.
+        check_shift(BinOp::ShlUnchecked, 1u8, u128::MAX, Err(()));
+        check_shift(BinOp::ShlUnchecked, 1u64, u128::MAX, Err(()));
     }
 }
