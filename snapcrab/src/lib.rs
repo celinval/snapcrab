@@ -28,6 +28,8 @@ use crate::value::TypedValue;
 use anyhow::{Context, Result, bail};
 use rustc_public::mir::mono::Instance;
 use rustc_public::{CrateDef, CrateItem, entry_fn, local_crate};
+use std::ffi::{CStr, CString};
+use std::path::Path;
 use std::process::ExitCode;
 use tracing::info;
 
@@ -49,7 +51,14 @@ use tracing::info;
 /// // Execute a function named "my_test"
 /// let result = run_function("my_test")?;
 /// ```
-pub fn run_function(fn_name: &str, check_config: CheckConfig) -> Result<Vec<u8>> {
+pub fn run_function(
+    fn_name: &str,
+    check_config: CheckConfig,
+    native_libs: &[impl AsRef<Path>],
+) -> Result<Vec<u8>> {
+    // Load native libraries
+    load_native_libs(native_libs)?;
+
     // Find function definition by name
     let crate_def = local_crate();
     let fn_def = crate_def
@@ -99,7 +108,34 @@ pub fn run_function(fn_name: &str, check_config: CheckConfig) -> Result<Vec<u8>>
     Ok(result.as_bytes().to_vec())
 }
 
-pub fn run_main(check_config: CheckConfig) -> Result<ExitCode> {
+/// Load native shared libraries so their symbols are available to the interpreter.
+///
+/// Uses `RTLD_GLOBAL` so symbols are visible to `dlsym(RTLD_DEFAULT, ...)`,
+/// which is how the interpreter resolves native function addresses.
+/// `RTLD_LOCAL` (the default) would hide symbols from `RTLD_DEFAULT` lookups.
+fn load_native_libs(paths: &[impl AsRef<Path>]) -> Result<()> {
+    for path in paths {
+        let path = path.as_ref();
+        let c_path = CString::new(path.to_str().context("non-UTF8 library path")?)
+            .context("library path contains null byte")?;
+        // SAFETY: dlopen with RTLD_NOW | RTLD_GLOBAL loads the library and makes
+        // its symbols visible to subsequent dlsym(RTLD_DEFAULT, ...) calls.
+        let handle = unsafe { libc::dlopen(c_path.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+        if handle.is_null() {
+            let err = unsafe { CStr::from_ptr(libc::dlerror()) };
+            bail!(
+                "failed to load native library '{}': {}",
+                path.display(),
+                err.to_string_lossy()
+            );
+        }
+        info!("Loaded native library: {}", path.display());
+    }
+    Ok(())
+}
+
+pub fn run_main(check_config: CheckConfig, native_libs: &[impl AsRef<Path>]) -> Result<ExitCode> {
+    load_native_libs(native_libs)?;
     let entry_fn = entry_fn().context("No entry function found")?;
     info!("Found entry function: {}", entry_fn.name());
 

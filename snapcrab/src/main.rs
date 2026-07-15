@@ -24,9 +24,12 @@ use tracing::info;
 #[derive(Parser)]
 #[command(name = "snapcrab")]
 #[command(about = "A Rust interpreter that executes code at the MIR level")]
-#[command(
-    long_about = "SnapCrab is an experimental Rust interpreter that executes code directly from MIR (Mid-level Intermediate Representation) without compilation overhead, enabling rapid development iteration."
-)]
+#[command(long_about = "\
+SnapCrab is an experimental Rust interpreter that executes code directly \
+from MIR (Mid-level Intermediate Representation) without compilation \
+overhead, enabling rapid development iteration.\n\n\
+This interface currently targets single-crate interpretation. \
+Multi-crate support will be provided by cargo-snap.")]
 struct Args {
     /// Alternative start function (default: main)
     #[arg(
@@ -38,6 +41,10 @@ struct Args {
     /// Skip specific UB checks (comma-separated: validity, alignment, bounds)
     #[arg(long = "skip-check", value_delimiter = ',')]
     skip_checks: Vec<String>,
+
+    /// Native shared libraries to load before interpretation
+    #[arg(long = "native-lib")]
+    native_libs: Vec<String>,
 
     /// Input Rust file to interpret
     #[arg(help = "Path to the Rust source file to interpret")]
@@ -64,9 +71,11 @@ fn main() -> ExitCode {
     rustc_args.push(args.input);
 
     let check_config = snapcrab::CheckConfig::with_skipped(&args.skip_checks);
+    let native_libs = args.native_libs;
     let result = run!(&rustc_args, || start_interpreter(
         args.start_fn,
-        check_config
+        check_config,
+        &native_libs,
     ));
 
     match result {
@@ -89,6 +98,7 @@ fn main() -> ExitCode {
 fn start_interpreter(
     start_fn: Option<String>,
     check_config: snapcrab::CheckConfig,
+    native_libs: &[String],
 ) -> ControlFlow<()> {
     let target = MachineInfo::target();
     let host = MachineInfo {
@@ -107,9 +117,9 @@ fn start_interpreter(
 
     let result = if let Some(fn_name) = start_fn {
         info!("Using custom start function: {}", fn_name);
-        snapcrab::run_function(&fn_name, check_config).map(|_| ExitCode::SUCCESS)
+        snapcrab::run_function(&fn_name, check_config, native_libs).map(|_| ExitCode::SUCCESS)
     } else {
-        snapcrab::run_main(check_config)
+        snapcrab::run_main(check_config, native_libs)
     };
 
     match result {

@@ -42,8 +42,9 @@ pub fn run_interpreter_test(input_file: &Path) -> TestResult {
     ];
 
     // Use rustc_public to run the interpreter
+    let no_libs: &[&Path] = &[];
     let result = rustc_public::run!(&rustc_args, || {
-        match snapcrab::run_main(snapcrab::CheckConfig::default()) {
+        match snapcrab::run_main(snapcrab::CheckConfig::default(), no_libs) {
             Ok(_) => std::ops::ControlFlow::Continue(()),
             Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
         }
@@ -56,6 +57,14 @@ pub fn run_interpreter_test(input_file: &Path) -> TestResult {
 }
 
 pub fn run_custom_start_test(input_file: &Path, start_fn: &str) -> TestResult {
+    run_custom_start_test_with_libs(input_file, start_fn, &[] as &[&Path])
+}
+
+pub fn run_custom_start_test_with_libs(
+    input_file: &Path,
+    start_fn: &str,
+    native_libs: &[impl AsRef<std::path::Path> + Sync],
+) -> TestResult {
     // Set up rustc environment to compile the input file
     // Custom function tests use lib crate type
     let rustc_args = vec![
@@ -67,7 +76,7 @@ pub fn run_custom_start_test(input_file: &Path, start_fn: &str) -> TestResult {
     // Use rustc_public to run the interpreter
     let result: Result<(), rustc_public::CompilerError<TestResult>> =
         rustc_public::run!(&rustc_args, || {
-            match snapcrab::run_function(start_fn, snapcrab::CheckConfig::default()) {
+            match snapcrab::run_function(start_fn, snapcrab::CheckConfig::default(), native_libs) {
                 Ok(value) => std::ops::ControlFlow::Break(TestResult::SuccessWithValue(value)),
                 Err(e) => std::ops::ControlFlow::Break(TestResult::Error(e.to_string())),
             }
@@ -114,32 +123,13 @@ pub fn compile_cdylib(source: &Path) -> std::path::PathBuf {
     lib_path
 }
 
-/// Load a shared library into the current process.
-///
-/// Uses `RTLD_GLOBAL` so symbols are visible to `dlsym(RTLD_DEFAULT, ...)`,
-/// which is how the interpreter resolves native function addresses.
-/// `RTLD_LOCAL` (the default) would hide symbols from `RTLD_DEFAULT` lookups.
-pub fn load_native_lib(path: &Path) {
-    let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-    let handle = unsafe { libc::dlopen(c_path.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
-    assert!(!handle.is_null(), "Failed to dlopen {path:?}: {}", unsafe {
-        std::ffi::CStr::from_ptr(libc::dlerror())
-            .to_string_lossy()
-            .to_string()
-    });
-}
-
-/// Run an interpreter test with native libraries pre-loaded.
+/// Run an interpreter test with native libraries loaded before interpretation.
 pub fn run_native_call_test(
     input_file: &Path,
     start_fn: &str,
     native_libs: &[&Path],
 ) -> TestResult {
-    for lib in native_libs {
-        load_native_lib(lib);
-    }
-
-    run_custom_start_test(input_file, start_fn)
+    run_custom_start_test_with_libs(input_file, start_fn, native_libs)
 }
 
 #[macro_export]
