@@ -3,12 +3,19 @@
 //! When a function has no MIR body and is not an intrinsic we can shim,
 //! we fall back to calling the native compiled version directly. This works
 //! because:
-//! - The interpreter's memory uses real process addresses
+//! - The interpreter's memory uses real process addresses (Box<[u8]> buffers)
 //! - The std library linked into the compiler process uses the same ABI
 //! - The same rustc produced both the MIR and the native code
 //!
-//! The call uses a cranelift JIT'd trampoline that loads typed arguments
-//! and calls the target with the correct ABI.
+//! Symbol resolution uses `dlsym(RTLD_DEFAULT, ...)` which searches all
+//! libraries loaded with `RTLD_GLOBAL`. This includes std (always present)
+//! and any user-supplied libraries loaded via `--native-lib`.
+//!
+//! The actual call goes through a cranelift JIT'd trampoline (see [`jit`])
+//! that flattens interpreter values into a typed byte buffer, passes them
+//! to the target function, and writes the return value back to a buffer
+//! the interpreter can read. Cranelift handles register allocation and
+//! calling convention details.
 
 pub mod jit;
 

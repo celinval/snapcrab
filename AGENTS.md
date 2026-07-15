@@ -133,7 +133,8 @@ SnapCrab is a Rust interpreter operating at the MIR level. Key modules:
   - `rvalue.rs`: Expression evaluation including enum operations.
   - `place.rs`: Memory address resolution with projection handling.
   - `intrinsics.rs`: Compiler intrinsic shims.
-  - `native.rs`: Native function calls via `dlsym`.
+  - `native/`: Native function calls via `dlsym` + cranelift JIT trampolines.
+  - `native/jit.rs`: JIT engine that compiles per-signature trampolines at runtime.
   - `check.rs`: Value validity checking.
 - **`memory/`**: Memory model (stack, heap, statics).
 - **`value.rs`**: Runtime value representation.

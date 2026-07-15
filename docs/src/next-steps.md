@@ -6,16 +6,20 @@ A lot of the coverage we will add as we try more complex examples.
 
 - Reference handling
 - Heap allocation
-- Static objects
 - Drop semantics
 - ADTs
 - Intrinsics
-- DST
-
+- DST (partial — slices work, `dyn Trait` not yet supported)
 - Crate loading
-- FFI support
-- Standard library
 
+
+## Native calls
+
+- `PassMode::Cast` support (requires `CastTarget` in rustc_public)
+- Symbol caching (avoid repeated `dlsym` lookups)
+- Trampoline caching (reuse compiled trampolines for identical signatures)
+- Function pointer callbacks (native → interpreter via JIT stubs)
+- `#[track_caller]` implicit argument support
 
 ## RustC Public
 
@@ -25,3 +29,7 @@ Here is a list of things that we can improve in rustc_public:
    - Once we do this, we can remove place creation in the interpreter
 2. Add a way to retrieve all mono items
 3. Add a way to retrieve source for a span so we can use annotate_snippets.
+4. Expose `CastTarget` details from `PassMode::Cast` (needed for struct
+   pass/return in C ABI)
+5. Expose `#[track_caller]` implicit argument info
+   (see https://github.com/rust-lang/rust/pull/159204)
