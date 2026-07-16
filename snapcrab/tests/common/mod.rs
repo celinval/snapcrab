@@ -109,7 +109,12 @@ pub fn compile_cdylib(source: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(&out_dir).expect("Failed to create output directory");
 
     let stem = source.file_stem().unwrap().to_str().unwrap();
-    let lib_path = out_dir.join(format!("lib{stem}.so"));
+    let dylib_ext = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
+    let lib_path = out_dir.join(format!("lib{stem}.{dylib_ext}"));
 
     let rustc_args = vec![
         "snapcrab".to_string(),
@@ -170,7 +175,12 @@ pub fn compile_dylib_and_rlib(source: &Path) -> (std::path::PathBuf, std::path::
     );
 
     // Find the generated files (names include a crate hash).
-    let dylib = find_file_with_prefix(&out_dir, &format!("lib{stem}"), ".so");
+    let dylib_ext = if cfg!(target_os = "macos") {
+        ".dylib"
+    } else {
+        ".so"
+    };
+    let dylib = find_file_with_prefix(&out_dir, &format!("lib{stem}"), dylib_ext);
     let rlib = find_file_with_prefix(&out_dir, &format!("lib{stem}"), ".rlib");
     (dylib, rlib)
 }
