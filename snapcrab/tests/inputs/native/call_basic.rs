@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(unused, improper_ctypes)]
 
 unsafe extern "C" {
     fn add_u32(a: u32, b: u32) -> u32;

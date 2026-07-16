@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(unused, unnecessary_transmutes)]
 
 use std::mem;
 

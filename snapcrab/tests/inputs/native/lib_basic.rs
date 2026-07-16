@@ -1,3 +1,4 @@
+#![allow(improper_ctypes_definitions)]
 /// Native library with basic extern "C" functions for testing the JIT trampoline.
 
 #[no_mangle]
