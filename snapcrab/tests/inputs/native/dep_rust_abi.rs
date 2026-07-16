@@ -142,6 +142,29 @@ pub fn simd_add(a: u32x4, b: u32x4) -> u32x4 {
     a + b
 }
 
+// --- Statics ---
+
+pub static MAGIC: u32 = 42;
+
+pub static mut MUTABLE_COUNTER: u32 = 0;
+
+pub fn read_magic() -> u32 {
+    MAGIC
+}
+
+pub fn increment_counter() -> u32 {
+    unsafe {
+        MUTABLE_COUNTER += 1;
+        MUTABLE_COUNTER
+    }
+}
+
+/// Wrapper to make a raw pointer Sync for static placement.
+pub struct WrapperPtr(pub *mut u32);
+unsafe impl Sync for WrapperPtr {}
+
+pub static STATIC_WITH_PTR: WrapperPtr = WrapperPtr(std::ptr::null_mut());
+
 // --- Unsafe cases (should be rejected by check_call_safety) ---
 
 /// Struct with padding between fields.

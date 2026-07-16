@@ -19,6 +19,7 @@ use crate::value::Value;
 use anyhow::Result;
 use heap::Heap;
 use rustc_public::mir::Body;
+use rustc_public::mir::alloc::AllocId;
 use rustc_public::mir::mono::Instance;
 use rustc_public::target::MachineInfo;
 use rustc_public::ty::Ty;
@@ -81,7 +82,7 @@ impl ThreadMemory {
     }
 
     /// Resolve a compiler AllocId to a real memory address.
-    pub fn resolve_alloc(&self, alloc_id: rustc_public::mir::alloc::AllocId) -> usize {
+    pub fn resolve_alloc(&self, alloc_id: AllocId) -> Result<usize> {
         self.statics.resolve_alloc(alloc_id)
     }
 

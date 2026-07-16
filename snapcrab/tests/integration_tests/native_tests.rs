@@ -487,3 +487,35 @@ check_extern_crate!(
     start_fn = "test_return_mut_padded",
     result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
 );
+
+// --- Statics ---
+
+check_extern_crate!(
+    test_local_static,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_local_static",
+);
+
+check_extern_crate!(
+    test_external_static,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_external_static",
+);
+
+check_extern_crate!(
+    test_external_mutable_static,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_external_mutable_static",
+    result = TestResult::ErrorRegex(r".*unsupported.*duplicated in native code.*".to_string()),
+);
+
+check_extern_crate!(
+    test_static_with_mut_ptr,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_static_with_mut_ptr",
+    result = TestResult::ErrorRegex(r".*unsupported.*duplicated in native code.*".to_string()),
+);

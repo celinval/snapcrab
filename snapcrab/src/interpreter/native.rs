@@ -23,9 +23,9 @@ use crate::interpreter::check::{CheckConfig, validate_value};
 use crate::ty::{has_any_ptr_to_padded, has_mutable_ptr_to_padded, has_padding};
 use crate::value::Value;
 use anyhow::{Result, bail};
-use rustc_public::abi::FnAbi;
-use rustc_public::abi::PassMode;
+use rustc_public::abi::{FnAbi, PassMode};
 use rustc_public::mir::mono::Instance;
+use std::ffi::CString;
 use tracing::{debug, trace};
 
 /// Call a native function by resolving its mangled symbol name.
@@ -132,4 +132,18 @@ fn trace_fn_abi(
         trace!("  arg[{i}]: mode={:?}, ty={}", arg_abi.mode, arg_abi.ty);
     }
     trace!("  ret: mode={:?}, ty={}", fn_abi.ret.mode, fn_abi.ret.ty);
+}
+
+/// Look up a symbol in the current process without caching.
+pub(crate) fn resolve_symbol(symbol: &str) -> Option<*const ()> {
+    let Ok(c_name) = CString::new(symbol) else {
+        return None;
+    };
+    // SAFETY: dlsym with RTLD_DEFAULT is a read-only lookup.
+    let ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr()) };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(ptr.cast())
+    }
 }

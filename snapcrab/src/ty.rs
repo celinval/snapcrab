@@ -43,6 +43,30 @@ impl MonoType for Ty {
     }
 }
 
+/// Check if a type contains a mutable pointer (`&mut T` or `*mut T`).
+///
+/// Traverses struct/tuple/array fields recursively.
+pub fn contains_mutable_ptr(ty: Ty) -> bool {
+    match ty.kind() {
+        TyKind::RigidTy(
+            RigidTy::Ref(_, _, Mutability::Mut) | RigidTy::RawPtr(_, Mutability::Mut),
+        ) => true,
+        TyKind::RigidTy(
+            RigidTy::Ref(_, pointee, Mutability::Not) | RigidTy::RawPtr(pointee, Mutability::Not),
+        ) => contains_mutable_ptr(pointee),
+        TyKind::RigidTy(RigidTy::Adt(adt_def, args)) => adt_def.variants().iter().any(|v| {
+            v.fields()
+                .iter()
+                .any(|f| contains_mutable_ptr(f.ty_with_args(&args)))
+        }),
+        TyKind::RigidTy(RigidTy::Tuple(fields)) => fields.iter().any(|f| contains_mutable_ptr(*f)),
+        TyKind::RigidTy(RigidTy::Array(elem, _) | RigidTy::Slice(elem)) => {
+            contains_mutable_ptr(elem)
+        }
+        _ => false,
+    }
+}
+
 /// Check if a type contains a mutable pointer (`&mut T` or `*mut T`) where
 /// the pointee `T` has padding bytes.
 ///

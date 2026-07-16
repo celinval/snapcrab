@@ -414,7 +414,7 @@ impl FnInterpreter<'_> {
                 // Resolve provenance entries (pointers to other allocations).
                 let ptr_size = crate::memory::pointer_width();
                 for (offset, prov) in &alloc.provenance.ptrs {
-                    let addr = self.memory.resolve_alloc(prov.0);
+                    let addr = self.memory.resolve_alloc(prov.0)?;
                     let addr_bytes = addr.to_le_bytes();
                     bytes[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
                 }

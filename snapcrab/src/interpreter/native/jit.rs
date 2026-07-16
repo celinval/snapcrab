@@ -98,14 +98,8 @@ impl JitEngine {
         if let Some(&GlobalSymbol(ptr)) = inner.symbol_cache.get(symbol) {
             return Ok(ptr);
         }
-        let c_name =
-            std::ffi::CString::new(symbol).expect("symbol name should not contain null bytes");
-        // SAFETY: dlsym with RTLD_DEFAULT searches the current process's loaded symbols.
-        let ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr()) };
-        if ptr.is_null() {
-            bail!("symbol `{symbol}` not found in current process");
-        }
-        let ptr = ptr.cast::<()>();
+        let ptr = super::resolve_symbol(symbol)
+            .ok_or_else(|| anyhow::anyhow!("symbol `{symbol}` not found in current process"))?;
         inner
             .symbol_cache
             .insert(symbol.to_owned(), GlobalSymbol(ptr));

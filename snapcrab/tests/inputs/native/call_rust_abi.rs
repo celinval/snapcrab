@@ -153,6 +153,32 @@ pub fn test_simd_add() {
     assert!(c[3] == 44);
 }
 
+// --- Statics ---
+
+static LOCAL_MAGIC: u32 = 99;
+
+/// Access a local static (interpreter owns it, no conflict).
+pub fn test_local_static() {
+    assert!(LOCAL_MAGIC == 99);
+}
+
+/// Access an external static (exists in dylib — may warn about divergence).
+pub fn test_external_static() {
+    assert!(dep_rust_abi::MAGIC == 42);
+}
+
+/// Access an external mutable static (triggers divergence warning).
+pub fn test_external_mutable_static() {
+    unsafe {
+        assert!(dep_rust_abi::MUTABLE_COUNTER == 0);
+    }
+}
+
+/// Access an immutable static containing a mutable pointer (triggers divergence warning).
+pub fn test_static_with_mut_ptr() {
+    assert!(dep_rust_abi::STATIC_WITH_PTR.0 == std::ptr::null_mut());
+}
+
 // --- Unsafe cases (should be rejected) ---
 
 pub fn test_write_padded() {

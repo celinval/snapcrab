@@ -6,9 +6,14 @@
 //! Uses interior mutability (`RefCell`) because constant evaluation needs to
 //! materialize allocations lazily while the interpreter holds shared references.
 
+use crate::interpreter::native;
 use crate::memory::sanitizer::MemorySanitizer;
 use crate::memory::{MemoryAccessError, MemorySegment};
+use crate::ty::contains_mutable_ptr;
+use rustc_public::mir::Mutability;
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
+use rustc_public::mir::mono::{Instance, StaticDef};
+use rustc_public::{CrateDef, local_crate};
 use rustc_public_bridge::IndexedVal;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -38,23 +43,32 @@ impl Statics {
     ///
     /// Materializes the allocation on first access, recursively resolving
     /// nested provenance (e.g., a `&str` constant pointing to string bytes).
-    pub fn resolve_alloc(&self, alloc_id: AllocId) -> usize {
+    pub fn resolve_alloc(&self, alloc_id: AllocId) -> anyhow::Result<usize> {
         let id_idx = alloc_id.to_index();
         {
             let inner = self.inner.borrow();
             if let Some(&alloc_idx) = inner.alloc_map.get(&id_idx) {
-                return inner.allocations[alloc_idx].as_ptr() as usize;
+                return Ok(inner.allocations[alloc_idx].as_ptr() as usize);
             }
         }
 
         let global = GlobalAlloc::from(alloc_id);
         match global {
-            GlobalAlloc::Memory(alloc) => self.materialize_alloc(alloc_id, &alloc),
-            GlobalAlloc::Static(def) => match def.eval_initializer() {
-                Ok(alloc) => self.materialize_alloc(alloc_id, &alloc),
-                Err(_) => 0,
-            },
-            GlobalAlloc::Function(_) | GlobalAlloc::VTable(..) | GlobalAlloc::TypeId { .. } => 0,
+            GlobalAlloc::Memory(alloc) => Ok(self.materialize_alloc(alloc_id, &alloc)),
+            GlobalAlloc::Static(def) => {
+                let name = CrateDef::name(&def);
+                let alloc = def
+                    .eval_initializer()
+                    .map_err(|e| anyhow::anyhow!("failed to evaluate static `{name}`: {e}"))?;
+                let is_mutable = alloc.mutability == Mutability::Mut;
+                if is_mutable || contains_mutable_ptr(def.ty()) {
+                    check_static_not_duplicated(def)?;
+                }
+                Ok(self.materialize_alloc(alloc_id, &alloc))
+            }
+            GlobalAlloc::Function(_) | GlobalAlloc::VTable(..) | GlobalAlloc::TypeId { .. } => {
+                Ok(0)
+            }
         }
     }
 
@@ -72,7 +86,11 @@ impl Statics {
         // Resolve provenance: patch pointer-sized segments with real addresses.
         let ptr_size = crate::memory::pointer_width();
         for (offset, prov) in &alloc.provenance.ptrs {
-            let target_addr = self.resolve_alloc(prov.0);
+            // Nested provenance (e.g., &str pointing to string bytes) cannot
+            // be a duplicated mutable static, so unwrap is safe here.
+            let target_addr = self
+                .resolve_alloc(prov.0)
+                .expect("nested provenance resolution");
             let addr_bytes = target_addr.to_le_bytes();
             buf[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
         }
@@ -91,6 +109,28 @@ impl Statics {
 
         addr
     }
+}
+
+/// Bail if an external static with interior mutability also exists as a
+/// native symbol.
+///
+/// If both the interpreter and native code have their own copy, mutations
+/// from one side are invisible to the other.
+fn check_static_not_duplicated(def: StaticDef) -> anyhow::Result<()> {
+    if def.krate() == local_crate() {
+        return Ok(());
+    }
+    let instance = Instance::from(def);
+    let mangled = instance.mangled_name();
+    if native::resolve_symbol(mangled.as_str()).is_some() {
+        anyhow::bail!(
+            "unsupported: static `{}` allows mutation and is duplicated in \
+             native code — mutations from one side would be invisible to \
+             the other",
+            instance.name()
+        );
+    }
+    Ok(())
 }
 
 // SAFETY: Allocations are stored in Box<[u8]> that are never moved or reallocated
