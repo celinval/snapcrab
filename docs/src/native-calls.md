@@ -128,8 +128,9 @@ interpreter-visible memory uninitialized:
 - Indirect returns where the return type has padding — the callee writes
   the full struct (including padding from its native stack) into the
   interpreter's buffer.
-- Return types containing a mutable pointer to a padded type — the
-  interpreter may later read through it into native-written memory.
+- Return types containing any pointer (mutable or const) to a padded
+  type — native code may return a pointer to memory it allocated with
+  uninitialized padding, and the interpreter would read through it.
 
 The check traverses types recursively through struct fields, tuples, arrays,
 and pointer indirections to find mutable pointers to padded types anywhere
@@ -144,14 +145,13 @@ interpreter subsequently reads those bytes, this is technically undefined
 behavior.
 
 The `check_call_safety` check mitigates this by rejecting calls where we can
-statically determine that uninitialized padding may be introduced. However,
-it cannot catch all cases (e.g., a native function that allocates memory
-internally and returns a pointer to it).
+statically determine that uninitialized padding may be introduced.
 
 Possible future improvements:
 - Track all memory reachable across the interpreter/native boundary.
 - Change `Value` to use `MaybeUninit<u8>` and treat padding as uninitialized.
 - Sanitize values from native code by zeroing their padding bytes.
+- Handle static objects shared across the interpreter/native boundary.
 
 ## Limitations
 
@@ -159,4 +159,5 @@ Possible future improvements:
 - `#[track_caller]` functions add an implicit `&Location` argument not
   visible in MIR — detected and reported as an error
 - Native calls with mutable pointers to padded types are rejected
+- Native calls returning pointers to padded types are rejected
   (see [Validation](#validation))
