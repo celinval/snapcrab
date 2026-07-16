@@ -308,7 +308,10 @@ impl JitEngineInner {
                     target_sig.returns.push(AbiParam::new(*ty2));
                 }
                 RetMode::Indirect => {
-                    target_sig.params.insert(0, AbiParam::new(self.pointer_ty));
+                    target_sig.params.insert(
+                        0,
+                        AbiParam::special(self.pointer_ty, ir::ArgumentPurpose::StructReturn),
+                    );
                 }
             }
         }
