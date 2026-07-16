@@ -58,7 +58,7 @@ jobs:
         with:
           tool: cargo-llvm-cov,cargo-nextest
       - name: Generate coverage report
-        run: cargo llvm-cov nextest --html
+        run: cargo llvm-cov nextest --html --no-fail-fast
       - name: Print coverage summary
         run: cargo llvm-cov --no-run --summary-only
       - name: Upload HTML report
