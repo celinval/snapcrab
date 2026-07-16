@@ -33,6 +33,11 @@ pub fn pointer_width() -> usize {
     MACHINE_INFO.pointer_width.bytes()
 }
 
+/// Returns the target machine info.
+pub fn machine_info() -> &'static MachineInfo {
+    &MACHINE_INFO
+}
+
 /// Thread-local memory representation.
 ///
 /// This is the main structure exported to the rest of the interpreter.

@@ -120,7 +120,14 @@ impl JitEngine {
     ///    correct ABI, and stores the result to `ret_buf`.
     /// 3. Call the trampoline, passing fn_ptr, the arg buffer, and a zeroed
     ///    return buffer. Read the return bytes from the buffer.
-    pub fn call_native(
+    ///
+    /// # Safety
+    ///
+    /// Safe as long as the callee upholds:
+    /// 1. It does not write values with uninitialized padding bytes into
+    ///    memory reachable by the interpreter.
+    /// 2. Its ABI matches what `fn_abi` describes.
+    pub unsafe fn call_native(
         &self,
         fn_ptr: *const (),
         fn_abi: &FnAbi,
@@ -156,15 +163,20 @@ impl JitEngine {
         // Release the lock before calling the trampoline (it might re-enter).
         drop(inner);
 
-        // Call the trampoline.
         let mut ret_buf = vec![MaybeUninit::<u8>::zeroed(); ret_size];
-        // SAFETY: trampoline is JIT'd code matching the Trampoline signature.
+        // SAFETY: This is only sound if the native function does not leave
+        // memory accessible to the interpreter in an uninitialized state.
+        // For example, if the function receives a pointer and writes a struct
+        // with padding bytes into the pointee, those padding bytes become
+        // uninitialized from the interpreter's perspective. We currently only
+        // sanitize the return buffer (pre-zeroed above).
         unsafe { trampoline(fn_ptr, args_buf.as_ptr(), ret_buf.as_mut_ptr()) };
 
         if ret_size == 0 {
             Ok(Value::unit().clone())
         } else {
-            // SAFETY: trampoline wrote the return value; padding bytes are zeroed.
+            // SAFETY: The trampoline wrote the return value for each scalar types.
+            // The buffer was pre-zeroed so padding bytes are defined.
             let bytes: Vec<u8> = ret_buf.iter().map(|b| unsafe { b.assume_init() }).collect();
             Ok(Value::from_bytes(&bytes))
         }

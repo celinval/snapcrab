@@ -114,6 +114,9 @@ pub fn run_function(
 /// which is how the interpreter resolves native function addresses.
 /// `RTLD_LOCAL` (the default) would hide symbols from `RTLD_DEFAULT` lookups.
 fn load_native_libs(paths: &[impl AsRef<Path>]) -> Result<()> {
+    if !paths.is_empty() {
+        eprintln!("warning: native library loading is highly experimental and potentially unsafe");
+    }
     for path in paths {
         let path = path.as_ref();
         let c_path = CString::new(path.to_str().context("non-UTF8 library path")?)

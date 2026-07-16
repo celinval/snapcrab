@@ -451,3 +451,39 @@ check_extern_crate!(
     input = "native/call_rust_abi.rs",
     start_fn = "test_simd_add",
 );
+
+// --- Safety check: calls that should be rejected ---
+
+use crate::common::TestResult;
+
+check_extern_crate!(
+    test_reject_mut_ref_to_padded,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_write_padded",
+    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+);
+
+check_extern_crate!(
+    test_reject_raw_mut_ptr_to_padded,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_write_padded_raw",
+    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+);
+
+check_extern_crate!(
+    test_reject_nested_mut_ref_to_padded,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_read_wraps_mut",
+    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+);
+
+check_extern_crate!(
+    test_reject_return_mut_ptr_to_padded,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_return_mut_padded",
+    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+);

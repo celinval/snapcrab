@@ -141,3 +141,39 @@ pub fn simd_make(a: u32, b: u32, c: u32, d: u32) -> u32x4 {
 pub fn simd_add(a: u32x4, b: u32x4) -> u32x4 {
     a + b
 }
+
+// --- Unsafe cases (should be rejected by check_call_safety) ---
+
+/// Struct with padding between fields.
+pub struct Padded {
+    pub a: u8,
+    pub b: u64,
+}
+
+/// Takes a mutable reference to a padded type.
+pub fn write_padded(p: &mut Padded) {
+    p.a = 1;
+    p.b = 2;
+}
+
+/// Takes a raw mutable pointer to a padded type.
+pub fn write_padded_raw(p: *mut Padded) {
+    unsafe {
+        (*p).a = 3;
+        (*p).b = 4;
+    }
+}
+
+/// Takes an immutable reference to a struct containing &mut to padded.
+pub struct WrapsMutPadded<'a> {
+    pub inner: &'a mut Padded,
+}
+
+pub fn read_wraps_mut(w: &WrapsMutPadded) -> u8 {
+    w.inner.a
+}
+
+/// Returns a mutable pointer to a padded type.
+pub fn get_mut_padded(p: &mut Padded) -> *mut Padded {
+    p as *mut Padded
+}

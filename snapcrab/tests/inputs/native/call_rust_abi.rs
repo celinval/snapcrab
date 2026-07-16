@@ -152,3 +152,26 @@ pub fn test_simd_add() {
     assert!(c[2] == 33);
     assert!(c[3] == 44);
 }
+
+// --- Unsafe cases (should be rejected) ---
+
+pub fn test_write_padded() {
+    let mut p = dep_rust_abi::Padded { a: 0, b: 0 };
+    dep_rust_abi::write_padded(&mut p);
+}
+
+pub fn test_write_padded_raw() {
+    let mut p = dep_rust_abi::Padded { a: 0, b: 0 };
+    dep_rust_abi::write_padded_raw(&mut p as *mut dep_rust_abi::Padded);
+}
+
+pub fn test_read_wraps_mut() {
+    let mut p = dep_rust_abi::Padded { a: 0, b: 0 };
+    let w = dep_rust_abi::WrapsMutPadded { inner: &mut p };
+    dep_rust_abi::read_wraps_mut(&w);
+}
+
+pub fn test_return_mut_padded() {
+    let mut p = dep_rust_abi::Padded { a: 0, b: 0 };
+    let _ = dep_rust_abi::get_mut_padded(&mut p);
+}

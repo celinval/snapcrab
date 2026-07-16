@@ -1,5 +1,8 @@
 # Native function calls
 
+> **Status: Work in progress.** This feature is very experimental and has known
+> safety limitations. Yes, snapcrab is experimental, which means this is super unstable and **potentially unsafe* even if the interpreted code is safe. See [Safety](#safety) below.
+
 ## Overview
 
 When the interpreter encounters a function without a MIR body (and it's not a
@@ -90,6 +93,25 @@ This affects:
 - Returning small structs from `extern "C"` functions
 - Passing arrays by value
 
+### Limitations of the `rustc_public` ABI API
+
+The `FnAbi`/`PassMode` information exposed by `rustc_public` may not be
+sufficient for building fully correct native call sequences without LLVM.
+As discussed in [rust-lang/rust#159359](https://github.com/rust-lang/rust/pull/159359),
+`PassMode::Direct` with `BackendRepr::Scalar` does not guarantee the value
+is actually passed directly — LLVM's backend can interpret IR patterns
+differently depending on the target, argument position, and other factors.
+
+The internal ABI representations were originally designed for a single-backend
+context (LLVM) and are essentially "ABI modulo LLVM." Building correct call
+sequences without LLVM would require reimplementing LLVM's exact ABI lowering
+logic — which is what cranelift does independently for its own targets.
+
+In practice, SnapCrab works correctly for the common cases (scalars, pairs,
+indirect) because these map straightforwardly to cranelift IR. The risk is
+in edge cases where LLVM and cranelift disagree on ABI lowering for the same
+`PassMode` description.
+
 ## Validation
 
 Before calling native code, we validate all argument values against their
@@ -97,12 +119,44 @@ type's `valid_range` (scalar constraints from the layout). This catches
 invalid bool, NonZero, enum discriminant, and pointer values before they
 cross the boundary.
 
+Additionally, `check_call_safety` rejects calls that could leave
+interpreter-visible memory uninitialized:
+
+- Arguments containing a mutable pointer (`&mut T` or `*mut T`) where `T`
+  has padding bytes — native code may write a struct with uninitialized
+  padding through the pointer.
+- Indirect returns where the return type has padding — the callee writes
+  the full struct (including padding from its native stack) into the
+  interpreter's buffer.
+- Return types containing a mutable pointer to a padded type — the
+  interpreter may later read through it into native-written memory.
+
+The check traverses types recursively through struct fields, tuples, arrays,
+and pointer indirections to find mutable pointers to padded types anywhere
+in the argument or return type.
+
+## Safety
+
+Native calls are inherently unsafe. The interpreter currently assumes all
+memory buffers are fully initialized, but native code can write uninitialized
+bytes (e.g., struct padding) into any buffer it has access to. When the
+interpreter subsequently reads those bytes, this is technically undefined
+behavior.
+
+The `check_call_safety` check mitigates this by rejecting calls where we can
+statically determine that uninitialized padding may be introduced. However,
+it cannot catch all cases (e.g., a native function that allocates memory
+internally and returns a pointer to it).
+
+Possible future improvements:
+- Track all memory reachable across the interpreter/native boundary.
+- Change `Value` to use `MaybeUninit<u8>` and treat padding as uninitialized.
+- Sanitize values from native code by zeroing their padding bytes.
+
 ## Limitations
 
 - `PassMode::Cast` not yet supported (requires `CastTarget` in `rustc_public`)
 - `#[track_caller]` functions add an implicit `&Location` argument not
   visible in MIR — detected and reported as an error
-- Float equality comparisons not supported in the interpreter (unrelated to
-  native calls, but surfaces in tests)
-- Symbol resolution is not cached (`dlsym` called on every invocation)
-
+- Native calls with mutable pointers to padded types are rejected
+  (see [Validation](#validation))
