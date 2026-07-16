@@ -33,11 +33,18 @@ impl PartialEq for TestResult {
 }
 
 pub fn run_interpreter_test(input_file: &Path) -> TestResult {
+    let thread_id = format!("{:?}", std::thread::current().id());
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("test-bins")
+        .join(&thread_id);
+    std::fs::create_dir_all(&out_dir).expect("Failed to create output directory");
+
     // Set up rustc environment to compile the input file
     // Main function tests use bin crate type
     let rustc_args = vec![
         "snapcrab".to_string(),
         "--crate-type=bin".to_string(),
+        format!("--out-dir={}", out_dir.to_str().unwrap()),
         input_file.to_string_lossy().to_string(),
     ];
 
