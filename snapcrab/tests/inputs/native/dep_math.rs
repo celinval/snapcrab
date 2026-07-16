@@ -13,6 +13,10 @@ pub fn negate(x: i32) -> i32 {
     -x
 }
 
+pub fn subtract(a: u32, b: u32) -> u32 {
+    a - b
+}
+
 /// This is generic — its MIR will be monomorphized in the caller crate
 /// and interpreted, not native-called.
 pub fn generic_add<T: std::ops::Add<Output = T>>(a: T, b: T) -> T {

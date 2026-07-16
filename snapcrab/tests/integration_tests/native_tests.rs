@@ -236,6 +236,27 @@ check_extern_crate!(
     start_fn = "test_generic_add",
 );
 
+check_extern_crate!(
+    test_extern_crate_repeated_calls,
+    dep = "native/dep_math.rs",
+    input = "native/call_dep_math.rs",
+    start_fn = "test_repeated_calls",
+);
+
+check_extern_crate!(
+    test_extern_crate_shared_trampoline,
+    dep = "native/dep_math.rs",
+    input = "native/call_dep_math.rs",
+    start_fn = "test_shared_trampoline",
+);
+
+check_extern_crate!(
+    test_extern_crate_different_abis,
+    dep = "native/dep_math.rs",
+    input = "native/call_dep_math.rs",
+    start_fn = "test_different_abis",
+);
+
 // --- Rust ABI: Scalar (Direct) ---
 
 check_extern_crate!(

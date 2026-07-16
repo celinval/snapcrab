@@ -21,9 +21,8 @@ pub mod jit;
 
 use crate::interpreter::check::{CheckConfig, validate_value};
 use crate::value::Value;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use rustc_public::mir::mono::Instance;
-use std::ffi::CString;
 use tracing::{debug, trace};
 
 /// Call a native function by resolving its mangled symbol name.
@@ -48,20 +47,15 @@ pub fn call_native(
         validate_value(arg_val, arg_abi.ty, config)?;
     }
 
-    // Resolve symbol from the current process via dlsym(RTLD_DEFAULT, ...).
-    // TODO: cache resolved symbols to avoid repeated linear searches.
+    // Resolve symbol from the current process (cached).
     let symbol_name = mangled.as_str();
-    let c_name = CString::new(symbol_name).expect("Symbol name should not contain null bytes");
-    // SAFETY: dlsym with RTLD_DEFAULT searches the current process's loaded symbols.
-    // The returned pointer is valid for the process lifetime (std is always loaded).
-    let fn_ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr()) };
-    if fn_ptr.is_null() {
-        bail!("Failed to invoke `{name}`: symbol `{symbol_name}` not found in current process");
-    }
+    let fn_ptr = jit
+        .resolve_symbol(symbol_name)
+        .map_err(|e| anyhow::anyhow!("Failed to invoke `{name}`: {e}"))?;
     trace!("Resolved symbol `{symbol_name}` at {fn_ptr:?}");
 
     // Call via JIT'd trampoline.
-    let result = jit.call_native(fn_ptr.cast(), &fn_abi, args, &name)?;
+    let result = jit.call_native(fn_ptr, &fn_abi, args, &name)?;
     debug!("Native call returned: {name}");
     Ok(result)
 }

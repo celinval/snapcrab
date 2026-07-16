@@ -26,6 +26,7 @@ use rustc_public::abi::{
     FieldsShape, FloatLength, FnAbi, IntegerLength, LayoutShape, PassMode, Primitive, Scalar,
     ValueAbi,
 };
+use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, trace};
@@ -49,8 +50,20 @@ struct JitEngineInner {
     pointer_ty: ir::Type,
     call_conv: CallConv,
     counter: u32,
-    // TODO: cache trampolines by signature shape.
+    trampoline_cache: HashMap<FnAbi, Trampoline>,
+    symbol_cache: HashMap<String, GlobalSymbol>,
 }
+
+// SAFETY: JitEngineInner is only accessed through a Mutex, so concurrent
+// access is impossible. The raw pointers inside (JITModule's code memory,
+// cached symbols) are valid for the process lifetime and never mutated
+// without the lock held.
+unsafe impl Send for JitEngineInner {}
+unsafe impl Sync for JitEngineInner {}
+
+/// A symbol pointer obtained from dlsym, valid for the process lifetime.
+#[derive(Clone, Copy)]
+struct GlobalSymbol(*const ());
 
 impl JitEngine {
     /// Create a new JIT engine for the host platform.
@@ -74,7 +87,29 @@ impl JitEngine {
             pointer_ty,
             call_conv,
             counter: 0,
+            trampoline_cache: HashMap::new(),
+            symbol_cache: HashMap::new(),
         }))))
+    }
+
+    /// Resolve a symbol by name, returning a cached pointer or looking it up via dlsym.
+    pub fn resolve_symbol(&self, symbol: &str) -> Result<*const ()> {
+        let mut inner = self.0.lock().unwrap();
+        if let Some(&GlobalSymbol(ptr)) = inner.symbol_cache.get(symbol) {
+            return Ok(ptr);
+        }
+        let c_name =
+            std::ffi::CString::new(symbol).expect("symbol name should not contain null bytes");
+        // SAFETY: dlsym with RTLD_DEFAULT searches the current process's loaded symbols.
+        let ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr()) };
+        if ptr.is_null() {
+            bail!("symbol `{symbol}` not found in current process");
+        }
+        let ptr = ptr.cast::<()>();
+        inner
+            .symbol_cache
+            .insert(symbol.to_owned(), GlobalSymbol(ptr));
+        Ok(ptr)
     }
 
     /// Call a native function via a JIT'd trampoline.
@@ -103,15 +138,20 @@ impl JitEngine {
             arg_layout.len()
         );
 
-        // Build the return info for the trampoline.
-        let ret_info = inner.build_ret_info(fn_abi, ret_size)?;
-        trace!(
-            "  ret: size={ret_size}, mode={:?}",
-            ret_info.as_ref().map(|r| &r.mode)
-        );
-
-        // Compile the trampoline.
-        let trampoline = inner.compile_trampoline(&arg_layout, ret_info.as_ref(), fn_name)?;
+        // Look up or compile the trampoline.
+        let trampoline = if let Some(&cached) = inner.trampoline_cache.get(fn_abi) {
+            trace!("  trampoline cache hit");
+            cached
+        } else {
+            let ret_info = inner.build_ret_info(fn_abi, ret_size)?;
+            trace!(
+                "  ret: size={ret_size}, mode={:?}",
+                ret_info.as_ref().map(|r| &r.mode)
+            );
+            let t = inner.compile_trampoline(&arg_layout, ret_info.as_ref(), fn_name)?;
+            inner.trampoline_cache.insert(fn_abi.clone(), t);
+            t
+        };
 
         // Release the lock before calling the trampoline (it might re-enter).
         drop(inner);
