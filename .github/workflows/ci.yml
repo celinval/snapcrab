@@ -6,12 +6,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   check:
@@ -54,9 +54,11 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - run: cargo install cargo-llvm-cov --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov,cargo-nextest
       - name: Generate coverage report
-        run: cargo llvm-cov --html
+        run: cargo llvm-cov nextest --html
       - name: Print coverage summary
         run: cargo llvm-cov --no-run --summary-only
       - name: Upload HTML report

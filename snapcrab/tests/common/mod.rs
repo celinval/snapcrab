@@ -33,10 +33,10 @@ impl PartialEq for TestResult {
 }
 
 pub fn run_interpreter_test(input_file: &Path) -> TestResult {
-    let thread_id = format!("{:?}", std::thread::current().id());
+    let unique_id = format!("{}-{:?}", std::process::id(), std::thread::current().id());
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("test-bins")
-        .join(&thread_id);
+        .join(&unique_id);
     std::fs::create_dir_all(&out_dir).expect("Failed to create output directory");
 
     // Set up rustc environment to compile the input file
@@ -102,10 +102,10 @@ pub fn run_custom_start_test_with_libs(
 /// test binary, guaranteeing ABI/flag consistency.
 /// Each thread compiles into its own subdirectory to avoid races.
 pub fn compile_cdylib(source: &Path) -> std::path::PathBuf {
-    let thread_id = format!("{:?}", std::thread::current().id());
+    let unique_id = format!("{}-{:?}", std::process::id(), std::thread::current().id());
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("test-libs")
-        .join(&thread_id);
+        .join(&unique_id);
     std::fs::create_dir_all(&out_dir).expect("Failed to create output directory");
 
     let stem = source.file_stem().unwrap().to_str().unwrap();
@@ -149,10 +149,10 @@ pub fn run_native_call_test(
 /// Returns `(dylib_path, rlib_path)`. Both are produced in a single
 /// `rustc` invocation so the crate hash matches exactly.
 pub fn compile_dylib_and_rlib(source: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
-    let thread_id = format!("{:?}", std::thread::current().id());
+    let unique_id = format!("{}-{:?}", std::process::id(), std::thread::current().id());
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("test-libs")
-        .join(&thread_id);
+        .join(&unique_id);
     std::fs::create_dir_all(&out_dir).expect("Failed to create output directory");
 
     let stem = source.file_stem().unwrap().to_str().unwrap();
