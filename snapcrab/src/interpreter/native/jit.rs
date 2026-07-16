@@ -28,7 +28,7 @@ use rustc_public::abi::{
 };
 use std::mem::MaybeUninit;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Trampoline function type.
 type Trampoline = unsafe extern "C" fn(*const (), *const u8, *mut MaybeUninit<u8>);
@@ -92,16 +92,23 @@ impl JitEngine {
         args: &[Value],
         fn_name: &str,
     ) -> Result<Value> {
-        debug!("JIT native call: {fn_name}");
-
         let mut inner = self.0.lock().unwrap();
         let ret_size = fn_abi.ret.ty.layout()?.shape().size.bytes();
 
         // Build the argument buffer.
         let (args_buf, arg_layout) = inner.build_args_buffer(fn_abi, args)?;
+        trace!(
+            "  args_buf: {} bytes, {} entries",
+            args_buf.len(),
+            arg_layout.len()
+        );
 
         // Build the return info for the trampoline.
         let ret_info = inner.build_ret_info(fn_abi, ret_size)?;
+        trace!(
+            "  ret: size={ret_size}, mode={:?}",
+            ret_info.as_ref().map(|r| &r.mode)
+        );
 
         // Compile the trampoline.
         let trampoline = inner.compile_trampoline(&arg_layout, ret_info.as_ref(), fn_name)?;
@@ -224,6 +231,8 @@ impl JitEngineInner {
         ret_info: Option<&RetInfo>,
         fn_name: &str,
     ) -> Result<Trampoline> {
+        debug!("Compiling trampoline for `{fn_name}`");
+
         // Trampoline signature: fn(fn_ptr: ptr, args_buf: ptr, ret_buf: ptr)
         let mut trampoline_sig = Signature::new(self.call_conv);
         trampoline_sig.params.push(AbiParam::new(self.pointer_ty));
@@ -337,6 +346,7 @@ impl JitEngineInner {
         self.module.finalize_definitions()?;
 
         let code_ptr = self.module.get_finalized_function(func_id);
+        trace!("Trampoline compiled at {code_ptr:?}");
         // SAFETY: code_ptr points to JIT'd code matching the Trampoline signature.
         Ok(unsafe { std::mem::transmute::<*const u8, Trampoline>(code_ptr) })
     }
@@ -372,10 +382,12 @@ struct ArgEntry {
 }
 
 /// Return value info for the trampoline.
+#[derive(Debug)]
 struct RetInfo {
     mode: RetMode,
 }
 
+#[derive(Debug)]
 enum RetMode {
     /// Return value in a single register, store to ret_buf.
     Direct(ir::Type),
