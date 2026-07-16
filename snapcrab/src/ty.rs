@@ -2,7 +2,7 @@
 use anyhow::Result;
 use rustc_public::abi::{Primitive, Scalar, ValueAbi};
 use rustc_public::mir::Mutability;
-use rustc_public::ty::{AdtDef, GenericArgs, RigidTy, Ty, TyKind};
+use rustc_public::ty::{RigidTy, Ty, TyKind};
 
 pub trait MonoType {
     /// Return the size of the type in bytes.
@@ -46,29 +46,50 @@ impl MonoType for Ty {
 /// Check if a type contains a mutable pointer (`&mut T` or `*mut T`) where
 /// the pointee `T` has padding bytes.
 ///
-/// Traverses struct/tuple/array fields recursively. Does not follow through
-/// pointer indirections (only checks the structure of the type itself).
+/// Traverses struct/tuple/array fields recursively and follows through
+/// immutable pointers to find mutable ones inside.
 pub fn has_mutable_ptr_to_padded(ty: Ty) -> bool {
+    has_ptr_to_padded_inner(ty, true)
+}
+
+/// Check if a type contains any pointer (`&T`, `*const T`, `&mut T`, `*mut T`)
+/// where the pointee `T` has padding bytes.
+///
+/// Used for return types: native code may return a pointer to memory it
+/// allocated with uninitialized padding, regardless of mutability.
+pub fn has_any_ptr_to_padded(ty: Ty) -> bool {
+    has_ptr_to_padded_inner(ty, false)
+}
+
+fn has_ptr_to_padded_inner(ty: Ty, mutable_only: bool) -> bool {
     match ty.kind() {
         TyKind::RigidTy(RigidTy::Ref(_, pointee, Mutability::Mut)
         | RigidTy::RawPtr(pointee, Mutability::Mut)) => {
-            has_padding(pointee) || has_mutable_ptr_to_padded(pointee)
+            has_padding(pointee) || has_ptr_to_padded_inner(pointee, mutable_only)
         }
         TyKind::RigidTy(RigidTy::Ref(_, pointee, Mutability::Not)
         | RigidTy::RawPtr(pointee, Mutability::Not)) => {
-            has_mutable_ptr_to_padded(pointee)
+            if !mutable_only && has_padding(pointee) {
+                return true;
+            }
+            has_ptr_to_padded_inner(pointee, mutable_only)
         }
         TyKind::RigidTy(RigidTy::Adt(adt_def, args)) => {
-            adt_fields_contain_mutable_ptr_to_padded(adt_def, &args)
+            adt_def.variants().iter().any(|variant| {
+                variant
+                    .fields()
+                    .iter()
+                    .any(|f| has_ptr_to_padded_inner(f.ty_with_args(&args), mutable_only))
+            })
         }
         TyKind::RigidTy(RigidTy::Tuple(fields)) => {
-            fields.iter().any(|f| has_mutable_ptr_to_padded(*f))
+            fields.iter().any(|f| has_ptr_to_padded_inner(*f, mutable_only))
         }
         TyKind::RigidTy(RigidTy::Array(elem, _) | RigidTy::Slice(elem)) => {
-            has_mutable_ptr_to_padded(elem)
+            has_ptr_to_padded_inner(elem, mutable_only)
         }
         // Scalars, function pointers, closures, dyn, str, never — cannot
-        // contain a mutable pointer to a padded type in their field layout.
+        // contain a pointer to a padded type in their field layout.
         TyKind::RigidTy(
             RigidTy::Bool
             | RigidTy::Char
@@ -88,7 +109,7 @@ pub fn has_mutable_ptr_to_padded(ty: Ty) -> bool {
             | RigidTy::Pat(..),
         )
         // Non-rigid types (aliases, params, bound vars) are not expected in
-        // monomorphized code
+        // monomorphized code.
         | TyKind::Alias(..)
         | TyKind::Param(_)
         | TyKind::Bound(..) => false,
@@ -131,18 +152,6 @@ pub fn has_padding(ty: Ty) -> bool {
             _ => true,
         },
     }
-}
-
-fn adt_fields_contain_mutable_ptr_to_padded(adt_def: AdtDef, args: &GenericArgs) -> bool {
-    for variant in adt_def.variants() {
-        for field in variant.fields() {
-            let field_ty = field.ty_with_args(args);
-            if has_mutable_ptr_to_padded(field_ty) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 /// Check if a composite type (struct, enum, union, tuple) has padding.

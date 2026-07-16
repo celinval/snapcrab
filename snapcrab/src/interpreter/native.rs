@@ -20,7 +20,7 @@
 pub mod jit;
 
 use crate::interpreter::check::{CheckConfig, validate_value};
-use crate::ty::{has_mutable_ptr_to_padded, has_padding};
+use crate::ty::{has_any_ptr_to_padded, has_mutable_ptr_to_padded, has_padding};
 use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::abi::FnAbi;
@@ -100,11 +100,12 @@ fn check_call_safety(fn_abi: &FnAbi, fn_name: &str) -> Result<()> {
         );
     }
 
-    // If the return type contains a mutable pointer to a padded type, the
-    // interpreter may later read through it into native-written memory.
-    if has_mutable_ptr_to_padded(fn_abi.ret.ty) {
+    // If the return type contains any pointer to a padded type, the
+    // interpreter may later read through it into native-allocated memory
+    // with uninitialized padding (regardless of pointer mutability).
+    if has_any_ptr_to_padded(fn_abi.ret.ty) {
         bail!(
-            "native call `{fn_name}` returns type containing a mutable pointer \
+            "native call `{fn_name}` returns type containing a pointer \
              to a type with padding — interpreter may read uninitialized bytes"
         );
     }
