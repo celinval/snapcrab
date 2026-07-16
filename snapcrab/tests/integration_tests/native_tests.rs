@@ -40,7 +40,6 @@ check_native_call!(
 );
 
 check_native_call!(
-    #[ignore] // void return from native call triggers spurious memory read
     test_native_no_return,
     native_lib = "native/lib_basic.rs",
     input = "native/call_basic.rs",
@@ -383,7 +382,6 @@ check_extern_crate!(
 );
 
 check_extern_crate!(
-    #[ignore] // void return from native call triggers spurious memory read
     test_rust_abi_unit_return,
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",

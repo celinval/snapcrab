@@ -99,6 +99,9 @@ impl ThreadMemory {
 
     pub fn read_addr(&self, address: usize, ty: Ty) -> Result<Value> {
         let size = ty.size()?;
+        if size == 0 {
+            return Ok(Value::unit().clone());
+        }
         let alignment = ty.alignment()?;
 
         // Check alignment
@@ -151,6 +154,9 @@ impl ThreadMemory {
 
     pub fn write_addr(&mut self, address: usize, data: &[u8], ty: Ty) -> Result<()> {
         let size = ty.size()?;
+        if size == 0 {
+            return Ok(());
+        }
         let alignment = ty.alignment()?;
 
         // Check alignment
