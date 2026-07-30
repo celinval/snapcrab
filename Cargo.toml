@@ -4,6 +4,10 @@ members = [
     "cargo-snap",
     "snapcrab-installer",
 ]
+# Test fixtures are standalone crates driven by cargo-snap integration tests.
+exclude = [
+    "cargo-snap/tests/fixtures",
+]
 resolver = "2"
 
 [workspace.package]
