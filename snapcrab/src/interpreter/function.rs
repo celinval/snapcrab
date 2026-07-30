@@ -3,7 +3,7 @@ use std::thread;
 use crate::memory::ThreadMemory;
 use crate::value::Value;
 use anyhow::{Context, Result, anyhow, bail};
-use rustc_public::mir::mono::Instance;
+use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
 use rustc_public::ty::{ConstantKind, MirConst, RigidTy, TyKind};
 use tracing::{debug, info};
@@ -63,6 +63,16 @@ pub fn invoke_fn(
         );
     }
 
+    // Tier 3: Shims
+    // Compiler-generated shims (e.g. closure `FnOnce::call_once`, drop glue)
+    // have no interpretable body and must not be native-called — bail clearly.
+    if instance.kind == InstanceKind::Shim {
+        bail!(
+            "Failed to invoke `{}`: compiler-generated shims are not yet supported",
+            instance.name()
+        );
+    }
+
     // Detect implicit arguments (e.g., #[track_caller] passes &Location).
     let fn_abi = instance.fn_abi()?;
     if fn_abi.args.len() > args.len() {
@@ -75,7 +85,7 @@ pub fn invoke_fn(
         );
     }
 
-    // Tier 3: native call via dlsym
+    // Tier 4: native call via dlsym
     let config = memory.check_config.clone();
     let jit = &memory.jit;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
