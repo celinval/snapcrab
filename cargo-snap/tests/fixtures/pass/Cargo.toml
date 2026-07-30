@@ -1,0 +1,9 @@
+[package]
+name = "pass"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+# Standalone crate: keep it out of the parent workspace.
+[workspace]
