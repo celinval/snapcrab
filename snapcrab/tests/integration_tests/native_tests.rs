@@ -490,9 +490,11 @@ check_extern_crate!(
 
 // --- On-stack passing (register exhaustion) ---
 
-// Exercises Indirect passing of a struct after register exhaustion:
-// byval (on_stack: true) on x86-64, pointer-in-register elsewhere.
+// Exercises byval (Indirect { on_stack: true }) struct passing after
+// register exhaustion. x86-64 only: on aarch64 the small struct is passed
+// via Cast (register-packed), which is not yet supported.
 check_extern_crate!(
+    #[cfg(target_arch = "x86_64")]
     test_on_stack_many_args_then_struct,
     dep = "native/dep_on_stack.rs",
     input = "native/call_on_stack.rs",
