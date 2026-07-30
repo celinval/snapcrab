@@ -20,3 +20,4 @@ include = [
 ]
 
 [dependencies]
+clap.workspace = true

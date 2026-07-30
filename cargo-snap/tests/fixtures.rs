@@ -42,7 +42,7 @@ fn run_fixture(name: &str) -> bool {
     );
 
     let status = Command::new(cargo_snap_bin())
-        .args(["snap", "check", "--manifest-path"])
+        .args(["snap", "run", "--manifest-path"])
         .arg(&manifest)
         .arg("--target-dir")
         .arg(&target_dir)
