@@ -155,9 +155,18 @@ cargo fmt
 # Run all tests
 cargo test --quiet
 
-# Run the interpreter
-cargo run -- input.rs
-cargo run -- --start-fn my_function --skip-check=validity input.rs
+# Run the interpreter (standalone, single file)
+cargo run -p snapcrab -- run input.rs
+cargo run -p snapcrab -- --skip-check=validity run --start-fn my_function input.rs
+
+# Run over a cargo project via the cargo-snap driver (installed on PATH).
+# The `snap` word is optional (`cargo snap run` or `cargo-snap run`).
+cargo snap run
+cargo snap test --filter my_test
+
+# Same via cargo during development
+cargo run -p cargo-snap -- run
+cargo run -p cargo-snap -- test --filter my_test
 ```
 
 ## Safety restrictions
