@@ -223,10 +223,15 @@ fn start_interpreter(args: &Args) -> ControlFlow<()> {
             }
             snapcrab::run_main(check_config, &args.native_libs).map(|_| ())
         }
-        Action::Test(_) => {
-            // TODO: discover and interpret `#[test]` functions.
-            eprintln!("error: `test` is not yet implemented");
-            return ControlFlow::Break(());
+        Action::Test(TestArgs { filter, .. }) => {
+            match snapcrab::run_tests(filter.as_deref(), check_config, &args.native_libs) {
+                Ok(true) => return ControlFlow::Continue(()),
+                Ok(false) => return ControlFlow::Break(()),
+                Err(e) => {
+                    eprintln!("{e}");
+                    return ControlFlow::Break(());
+                }
+            }
         }
     };
 

@@ -18,12 +18,14 @@ extern crate rustc_public_bridge;
 
 mod interpreter;
 mod memory;
+mod test_runner;
 mod ty;
 mod value;
 
 pub use crate::interpreter::check::CheckConfig;
 use crate::interpreter::function::invoke_fn;
 use crate::memory::ThreadMemory;
+pub use crate::test_runner::run_tests;
 use crate::value::TypedValue;
 use anyhow::{Context, Result, bail};
 use rustc_public::mir::mono::Instance;
