@@ -14,12 +14,11 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use rustc_public::target::{Endian, MachineInfo, MachineSize};
 use rustc_public::{CompilerError, run};
 use std::ops::ControlFlow;
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, info};
 
 #[derive(Parser)]
@@ -32,24 +31,56 @@ overhead, enabling rapid development iteration.\n\n\
 This interface currently targets single-crate interpretation. \
 Multi-crate support will be provided by cargo-snap.")]
 struct Args {
-    /// Alternative start function (default: main)
-    #[arg(
-        long,
-        help = "Specify a custom function to execute instead of main (requires fully qualified name)"
-    )]
-    start_fn: Option<String>,
-
     /// Skip specific UB checks (comma-separated: validity, alignment, bounds)
-    #[arg(long = "skip-check", value_delimiter = ',')]
+    #[arg(long = "skip-check", value_delimiter = ',', global = true)]
     skip_checks: Vec<String>,
 
     /// Native shared libraries to load before interpretation
-    #[arg(long = "native-lib")]
+    #[arg(long = "native-lib", global = true)]
     native_libs: Vec<String>,
 
-    /// Input Rust file to interpret (standalone single-file mode)
-    #[arg(help = "Path to the Rust source file to interpret")]
+    #[command(subcommand)]
+    action: Action,
+}
+
+#[derive(Subcommand, Clone)]
+enum Action {
+    /// Interpret the crate's entry point (`main`).
+    Run(RunArgs),
+    /// Discover and interpret the crate's tests.
+    Test(TestArgs),
+}
+
+/// Arguments for the `run` subcommand.
+#[derive(ClapArgs, Clone)]
+struct RunArgs {
+    /// Alternative start function (fully qualified name) instead of main.
+    #[arg(long)]
+    start_fn: Option<String>,
+
+    /// Input Rust file to interpret (the crate entry point).
     input: Option<String>,
+}
+
+/// Arguments for the `test` subcommand.
+#[derive(ClapArgs, Clone)]
+struct TestArgs {
+    /// Only run tests whose name contains this substring.
+    #[arg(long)]
+    filter: Option<String>,
+
+    /// Input Rust file to interpret (the crate entry point).
+    input: Option<String>,
+}
+
+impl Action {
+    /// The standalone input file, if provided.
+    fn input(&self) -> Option<&String> {
+        match self {
+            Action::Run(args) => args.input.as_ref(),
+            Action::Test(args) => args.input.as_ref(),
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -57,35 +88,45 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt().with_env_filter(log_level).init();
 
     // Wrapper mode: cargo-snap sets SNAPCRAB_WRAPPER and invokes us as
-    // `snapcrab <rustc-path> <rustc-args...>`.
+    // `snapcrab <rustc-path> <rustc-args...>`. The action and options come
+    // from SNAPCRAB_ARGS, parsed with the same CLI as standalone mode.
     if std::env::var_os("SNAPCRAB_WRAPPER").is_some() {
-        return run_as_wrapper();
+        run_as_wrapper()
+    } else {
+        run_standalone()
     }
+}
 
+/// Runs the standalone mode of snapcrab, parsing arguments and running checks.
+fn run_standalone() -> ExitCode {
     let args = Args::parse();
-    let Some(input) = args.input else {
+
+    let Some(input) = args.action.input() else {
         eprintln!("error: no input file provided");
         return ExitCode::FAILURE;
     };
 
-    let check_config = snapcrab::CheckConfig::with_skipped(&args.skip_checks);
-    let native_libs = args.native_libs;
-
     let mut rustc_args = vec!["snapcrab".to_string()];
-    // Add --crate-type=lib only if using custom start function.
-    if args.start_fn.is_some() {
+    // A custom start function requires a lib crate (no main needed).
+    if matches!(
+        &args.action,
+        Action::Run(RunArgs {
+            start_fn: Some(_),
+            ..
+        })
+    ) {
         rustc_args.push("--crate-type=lib".to_string());
     }
-    rustc_args.push(input);
+    rustc_args.push(input.clone());
 
-    run_interpreter(&rustc_args, args.start_fn, check_config, &native_libs)
+    run_rustc(&rustc_args, || start_interpreter(&args))
 }
 
 /// Run as a `RUSTC_WORKSPACE_WRAPPER`, invoked as `snapcrab <rustc> <args...>`.
 ///
 /// Probe invocations (e.g. `rustc -vV`, `--print`) are forwarded to the real
 /// compiler. Actual crate compilations are run through the interpreter, which
-/// executes the entry function (if any) after the build completes.
+/// performs the action (run/test) after the build completes.
 fn run_as_wrapper() -> ExitCode {
     // argv: [snapcrab, <rustc-path>, <rustc-args...>]
     let rustc_args: Vec<String> = std::env::args().skip(1).collect();
@@ -94,16 +135,26 @@ fn run_as_wrapper() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // Probe calls (no crate to build) just run the real rustc.
+    // Probe calls (rustc -vV, --print) have no crate to interpret; rustc
+    // handles them and stops before the callback fires.
     if is_probe_invocation(&rustc_args) {
-        return exec_real_rustc(&rustc_args);
+        return run_rustc(&rustc_args, || ControlFlow::Continue(()));
     }
 
-    let skip_checks = std::env::var("SNAPCRAB_SKIP_CHECKS").unwrap_or_default();
-    let skip: Vec<String> = skip_checks.split(',').map(String::from).collect();
-    let check_config = snapcrab::CheckConfig::with_skipped(&skip);
+    // The action and options are supplied by cargo-snap via SNAPCRAB_ARGS,
+    // e.g. "run" or "test --filter foo". Parse them with the standard CLI.
+    let snap_args = std::env::var("SNAPCRAB_ARGS").unwrap_or_else(|_| "run".to_string());
+    let argv = std::iter::once("snapcrab".to_string())
+        .chain(snap_args.split_whitespace().map(String::from));
+    let args = match Args::try_parse_from(argv) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("error: invalid SNAPCRAB_ARGS: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
-    run_interpreter(&rustc_args, None, check_config, &[])
+    run_rustc(&rustc_args, || start_interpreter(&args))
 }
 
 /// Whether this rustc invocation is a probe (version/print query) rather than
@@ -115,67 +166,31 @@ fn is_probe_invocation(rustc_args: &[String]) -> bool {
         .any(|a| a == "-vV" || a == "--version" || a.starts_with("--print"))
 }
 
-/// Forward the invocation to the real rustc unchanged.
-fn exec_real_rustc(rustc_args: &[String]) -> ExitCode {
-    let status = std::process::Command::new(&rustc_args[0])
-        .args(&rustc_args[1..])
-        .status();
-    match status {
-        Ok(s) if s.success() => ExitCode::SUCCESS,
-        Ok(_) => ExitCode::FAILURE,
-        Err(e) => {
-            eprintln!("error: failed to run rustc: {e}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// Drive the compiler + interpreter over `rustc_args`.
-fn run_interpreter(
+/// Compile `rustc_args`, running `callback` after analysis.
+///
+/// The callback returns `Continue(())` on success (letting compilation
+/// finish) or `Break(())` on failure. Maps outcomes to an exit code:
+/// - `Ok(())`         — compilation finished, callback succeeded → success
+/// - `Skipped`        — callback never ran (probe) → success
+/// - `Interrupted(_)` — callback signalled failure → failure
+/// - `Failed`         — compilation error → failure
+fn run_rustc(
     rustc_args: &[String],
-    start_fn: Option<String>,
-    check_config: snapcrab::CheckConfig,
-    native_libs: &[String],
+    callback: impl Fn() -> ControlFlow<()> + Send + Sync,
 ) -> ExitCode {
-    // The interpreter runs inside the compiler callback but returns
-    // `Continue` so compilation finishes. Record interpretation failures
-    // here so we can surface them as a non-zero exit code.
-    let failed = AtomicBool::new(false);
-    let result = run!(rustc_args, || start_interpreter(
-        start_fn.clone(),
-        check_config.clone(),
-        native_libs,
-        &failed,
-    ));
-
-    let compile_ok = matches!(
-        result,
-        Ok(_) | Err(CompilerError::Skipped | CompilerError::Interrupted(_))
-    );
-    if compile_ok && !failed.load(Ordering::Relaxed) {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
+    match run!(rustc_args, callback) {
+        Ok(()) | Err(CompilerError::Skipped) => ExitCode::SUCCESS,
+        Err(CompilerError::Interrupted(()) | CompilerError::Failed) => ExitCode::FAILURE,
     }
 }
 
-/// Start the interpreter with optional custom start function.
+/// Interpret the crate per `args`.
 ///
-/// This function initializes the interpreter and executes either the main function
-/// or a custom function specified by the user. It handles the complete execution
-/// flow and reports results.
-///
-/// # Arguments
-/// * `start_fn` - Optional name of custom function to execute instead of main
-///
-/// # Returns
-/// * `ControlFlow::Break(())` - Always breaks to exit the compiler callback
-fn start_interpreter(
-    start_fn: Option<String>,
-    check_config: snapcrab::CheckConfig,
-    native_libs: &[String],
-    failed: &AtomicBool,
-) -> ControlFlow<()> {
+/// Returns `Continue(())` on success (nothing to interpret, or interpretation
+/// succeeded) so compilation finishes, or `Break(())` on failure to signal a
+/// non-zero exit.
+fn start_interpreter(args: &Args) -> ControlFlow<()> {
+    let check_config = snapcrab::CheckConfig::with_skipped(&args.skip_checks);
     let target = MachineInfo::target();
     let host = MachineInfo {
         endian: Endian::Little,
@@ -191,22 +206,35 @@ fn start_interpreter(
     let crate_name = rustc_public::local_crate().name;
     info!("Interpreting crate: {}", crate_name);
 
-    let result = if let Some(fn_name) = start_fn {
-        info!("Using custom start function: {}", fn_name);
-        snapcrab::run_function(&fn_name, check_config, native_libs).map(|_| ExitCode::SUCCESS)
-    } else if rustc_public::entry_fn().is_some() {
-        snapcrab::run_main(check_config, native_libs)
-    } else {
-        // No entry function (e.g., a library crate being built as a
-        // dependency). Nothing to interpret — let the compilation finish.
-        debug!("No entry function found; skipping interpretation of `{crate_name}`");
-        return ControlFlow::Continue(());
+    let result = match &args.action {
+        Action::Run(RunArgs {
+            start_fn: Some(fn_name),
+            ..
+        }) => {
+            info!("Using custom start function: {}", fn_name);
+            snapcrab::run_function(fn_name, check_config, &args.native_libs).map(|_| ())
+        }
+        Action::Run(RunArgs { start_fn: None, .. }) => {
+            if rustc_public::entry_fn().is_none() {
+                // No entry function (e.g., a library crate being built as a
+                // dependency). Nothing to interpret — let compilation finish.
+                debug!("No entry function found; skipping interpretation of `{crate_name}`");
+                return ControlFlow::Continue(());
+            }
+            snapcrab::run_main(check_config, &args.native_libs).map(|_| ())
+        }
+        Action::Test(_) => {
+            // TODO: discover and interpret `#[test]` functions.
+            eprintln!("error: `test` is not yet implemented");
+            return ControlFlow::Break(());
+        }
     };
 
-    if let Err(e) = result {
-        eprintln!("{e}");
-        failed.store(true, Ordering::Relaxed);
+    match result {
+        Ok(()) => ControlFlow::Continue(()),
+        Err(e) => {
+            eprintln!("{e}");
+            ControlFlow::Break(())
+        }
     }
-
-    ControlFlow::Continue(())
 }

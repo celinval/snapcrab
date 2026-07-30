@@ -40,6 +40,8 @@ fn main() -> ExitCode {
     // can see dependency code. Requires RUSTC_BOOTSTRAP to allow the -Z flag.
     cmd.env("RUSTC_WORKSPACE_WRAPPER", &snapcrab);
     cmd.env("SNAPCRAB_WRAPPER", "1");
+    // Tell snapcrab which action to perform. Only `run` is wired up for now.
+    cmd.env("SNAPCRAB_ARGS", "run");
     cmd.env("RUSTC_BOOTSTRAP", "1");
     append_rustflags(&mut cmd, "-Zalways-encode-mir=yes");
 
