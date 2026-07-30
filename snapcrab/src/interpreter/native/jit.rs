@@ -207,11 +207,13 @@ impl JitEngineInner {
                     mode: RetMode::Pair(ty1, ty2, second_offset),
                 }))
             }
+            PassMode::Cast { .. } => {
+                bail!("PassMode::Cast return is not yet supported")
+            }
             PassMode::Indirect { .. } => Ok(Some(RetInfo {
                 mode: RetMode::Indirect,
             })),
             PassMode::Ignore => Ok(None),
-            _ => bail!("Unsupported return PassMode"),
         }
     }
 
@@ -257,7 +259,25 @@ impl JitEngineInner {
                         );
                     }
                 }
-                PassMode::Indirect { .. } => {
+                PassMode::Indirect { on_stack: true, .. } => {
+                    // Byval (on-stack) passing. Cranelift's `StructArgument`
+                    // abstraction handles the stack copy for us, but it is only
+                    // implemented for x86-64 — the aarch64 backend panics and
+                    // expects the frontend to lower byval args manually (copy
+                    // into a stack slot and pass a pointer). aarch64 does spill
+                    // small aggregates byval once registers are exhausted, so
+                    // supporting it there is future work; bail for now.
+                    if !cfg!(target_arch = "x86_64") {
+                        bail!(
+                            "on-stack (byval) argument passing is not yet \
+                             implemented for this target"
+                        );
+                    }
+                    ab.push_struct(arg_val.as_bytes());
+                }
+                PassMode::Indirect {
+                    on_stack: false, ..
+                } => {
                     let ptr = arg_val.as_bytes().as_ptr() as u64;
                     ab.push(self.pointer_ty, &ptr.to_le_bytes());
                 }
@@ -287,9 +307,19 @@ impl JitEngineInner {
 
         // Target function signature.
         let mut target_sig = Signature::new(self.call_conv);
-        target_sig
-            .params
-            .extend(arg_layout.iter().map(|entry| AbiParam::new(entry.ty)));
+        for entry in arg_layout {
+            match entry {
+                ArgEntry::Scalar { ty, .. } => {
+                    target_sig.params.push(AbiParam::new(*ty));
+                }
+                ArgEntry::Struct { size, .. } => {
+                    target_sig.params.push(AbiParam::special(
+                        self.pointer_ty,
+                        ir::ArgumentPurpose::StructArgument(*size),
+                    ));
+                }
+            }
+        }
 
         // Configure return type on target signature.
         let ret_indirect = matches!(
@@ -345,11 +375,18 @@ impl JitEngineInner {
                 call_args.push(ret_buf_param);
             }
             for entry in arg_layout {
-                let addr = builder.ins().iadd_imm(args_buf_param, entry.offset as i64);
-                let val = builder
-                    .ins()
-                    .load(entry.ty, MemFlagsData::trusted(), addr, 0);
-                call_args.push(val);
+                match entry {
+                    ArgEntry::Scalar { offset, ty } => {
+                        let addr = builder.ins().iadd_imm(args_buf_param, *offset as i64);
+                        let val = builder.ins().load(*ty, MemFlagsData::trusted(), addr, 0);
+                        call_args.push(val);
+                    }
+                    ArgEntry::Struct { offset, .. } => {
+                        // StructArgument: pass pointer to the data in the buffer.
+                        let addr = builder.ins().iadd_imm(args_buf_param, *offset as i64);
+                        call_args.push(addr);
+                    }
+                }
             }
 
             // Call fn_ptr with the target signature.
@@ -424,10 +461,12 @@ impl JitEngineInner {
     }
 }
 
-/// Argument layout entry: offset into the buffer and cranelift type.
-struct ArgEntry {
-    offset: usize,
-    ty: ir::Type,
+/// Argument layout entry: offset into the buffer and how to pass it.
+enum ArgEntry {
+    /// Load a typed value from the buffer and pass in a register.
+    Scalar { offset: usize, ty: ir::Type },
+    /// Pass a pointer to the buffer region (StructArgument — on-stack byval).
+    Struct { offset: usize, size: u32 },
 }
 
 /// Return value info for the trampoline.
@@ -461,7 +500,7 @@ impl ArgsBuffer {
         }
     }
 
-    /// Append a typed value to the buffer. Aligns, copies bytes, pads to type size.
+    /// Append a typed scalar value to the buffer.
     fn push(&mut self, ty: ir::Type, bytes: &[u8]) {
         let size = ty.bytes() as usize;
         while !self.buf.len().is_multiple_of(size) {
@@ -472,7 +511,24 @@ impl ArgsBuffer {
         while self.buf.len() < offset + size {
             self.buf.push(0);
         }
-        self.layout.push(ArgEntry { offset, ty });
+        self.layout.push(ArgEntry::Scalar { offset, ty });
+    }
+
+    /// Append a struct's raw bytes for on-stack (byval) passing.
+    fn push_struct(&mut self, bytes: &[u8]) {
+        while !self.buf.len().is_multiple_of(8) {
+            self.buf.push(0);
+        }
+        let offset = self.buf.len();
+        let size = bytes.len();
+        self.buf.extend_from_slice(bytes);
+        while !self.buf.len().is_multiple_of(8) {
+            self.buf.push(0);
+        }
+        self.layout.push(ArgEntry::Struct {
+            offset,
+            size: size as u32,
+        });
     }
 }
 

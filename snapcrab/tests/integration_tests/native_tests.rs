@@ -488,6 +488,17 @@ check_extern_crate!(
     result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
 );
 
+// --- On-stack passing (register exhaustion) ---
+
+// Exercises Indirect passing of a struct after register exhaustion:
+// byval (on_stack: true) on x86-64, pointer-in-register elsewhere.
+check_extern_crate!(
+    test_on_stack_many_args_then_struct,
+    dep = "native/dep_on_stack.rs",
+    input = "native/call_on_stack.rs",
+    start_fn = "test_many_args_then_struct",
+);
+
 // --- Statics ---
 
 check_extern_crate!(
