@@ -64,9 +64,22 @@ pub fn invoke_fn(
     }
 
     // Tier 3: Shims
-    // Compiler-generated shims (e.g. closure `FnOnce::call_once`, drop glue)
-    // have no interpretable body and must not be native-called — bail clearly.
+    //
+    // Compiler-generated shims (`rustc_public` collapses them all into
+    // `InstanceKind::Shim`) have no interpretable body via `rustc_public`.
+    // We currently only handle the closure call shim (`FnOnce::call_once`
+    // and friends) by forwarding to the closure body.
+    //
+    // TODO: handle the other shim kinds — most importantly drop glue
+    // (`drop_in_place`), plus clone shims, fn-pointer shims, and vtable
+    // shims. The scalable fix is to obtain the shim's synthesized MIR from
+    // the internal `TyCtxt` (via `run_with_tcx!`) and interpret it uniformly,
+    // rather than hand-implementing each kind. For now, assume any shim we
+    // can resolve to a closure is a closure call shim and reject the rest.
     if instance.kind == InstanceKind::Shim {
+        if let Some(closure) = closure_call_shim(instance) {
+            return invoke_closure_shim(closure, memory, args, unwinding);
+        }
         bail!(
             "Failed to invoke `{}`: compiler-generated shims are not yet supported",
             instance.name()
@@ -104,6 +117,64 @@ pub fn invoke_fn(
             bail!("Native call to `{}` panicked: {msg}", instance.name())
         }
     }
+}
+
+/// If `instance` is a closure call shim (`FnOnce/FnMut/Fn::call*`), resolve
+/// the underlying closure body instance.
+///
+/// The shim's first generic argument is the closure type; we resolve it as a
+/// `FnOnce` closure (call shims always consume via the once form at the MIR
+/// level for our purposes).
+fn closure_call_shim(instance: Instance) -> Option<Instance> {
+    use rustc_public::ty::{ClosureKind, GenericArgKind};
+
+    let first = instance.args().0.into_iter().next()?;
+    let GenericArgKind::Type(ty) = first else {
+        return None;
+    };
+    let TyKind::RigidTy(RigidTy::Closure(def, args)) = ty.kind() else {
+        return None;
+    };
+    let resolved = Instance::resolve_closure(def, &args, ClosureKind::Fn).ok()?;
+    // Guard against non-progress: if resolution returns another shim, we would
+    // recurse forever. Only accept an interpretable body.
+    if resolved.kind == InstanceKind::Shim || !resolved.has_body() {
+        return None;
+    }
+    Some(resolved)
+}
+
+/// Invoke a closure body from a call shim.
+///
+/// The closure body takes `(env, args_tuple)` — the same shape the call shim
+/// receives — so the shim is a passthrough. Any missing trailing arguments
+/// (e.g. an omitted `()` args tuple for a no-arg closure) are filled with
+/// zero-initialized values of the expected type.
+fn invoke_closure_shim(
+    closure: Instance,
+    memory: &mut ThreadMemory,
+    mut args: Vec<Value>,
+    unwinding: &mut Option<u16>,
+) -> Result<Value> {
+    use crate::ty::MonoType;
+
+    let body = closure.body().context("closure has no body")?;
+    let arg_locals = body.arg_locals();
+
+    // Fill any trailing arguments the caller didn't supply (e.g. a ZST args
+    // tuple). Non-ZST missing arguments are unsupported.
+    for local in arg_locals.iter().skip(args.len()) {
+        let size = local.ty.size()?;
+        if size != 0 {
+            bail!(
+                "closure shim missing a non-trivial argument of type `{}`",
+                local.ty
+            );
+        }
+        args.push(Value::with_size(size));
+    }
+
+    invoke_fn(closure, memory, args, unwinding)
 }
 
 impl FnInterpreter<'_> {
