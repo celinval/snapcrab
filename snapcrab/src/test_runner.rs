@@ -13,7 +13,7 @@
 //! `StaticTestFn`. Dynamically-named tests, benches, and custom harnesses
 //! are rejected.
 
-use crate::interpreter::function::invoke_fn;
+use crate::interpreter::function::{invoke_fn, panic_message, resolve_closure_shim};
 use crate::memory::ThreadMemory;
 use crate::{CheckConfig, load_native_libs};
 use anyhow::{Result, bail};
@@ -23,8 +23,9 @@ use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::{RigidTy, Ty, TyKind};
 use rustc_public::{CrateItem, entry_fn};
+use std::panic::{self};
 use std::path::Path;
-use tracing::{debug, info};
+use tracing::{error, info};
 
 /// A discovered test: its name and the function that runs it.
 ///
@@ -73,22 +74,41 @@ pub fn run_tests(
 
 /// Interpret a single test, catching panics. Returns whether it passed.
 fn run_one(test: &TestCase, check_config: &CheckConfig) -> bool {
-    let mut memory = ThreadMemory::new();
-    memory.check_config = check_config.clone();
-    // The test fn is a closure's `call_once`, which takes the closure
-    // environment as its receiver. `#[test]` closures capture nothing, so the
-    // environment is a ZST — pass an empty value.
+    // The `StaticTestFn` payload is a closure call shim; resolve it to the
+    // closure body. The body takes the (ZST) closure environment as its only
+    // argument — `#[test]` closures capture nothing.
+    let closure = match resolve_closure_shim(test.func) {
+        Ok(closure) => closure,
+        Err(e) => {
+            error!(
+                "failed to resolve closure shim for test `{}`: {e}",
+                test.name
+            );
+            return false;
+        }
+    };
+
     let env = crate::value::Value::unit().clone();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        invoke_fn(test.func, &mut memory, vec![env], &mut None)
-    }));
+
+    let result = panic::catch_unwind(|| {
+        let mut memory = ThreadMemory::new();
+        memory.check_config = check_config.clone();
+        invoke_fn(closure, &mut memory, vec![env], &mut None)
+    });
     match result {
         Ok(Ok(_)) => true,
         Ok(Err(e)) => {
-            debug!("test {} errored: {e}", test.name);
+            error!("test `{}` errored: {e}", test.name);
             false
         }
-        Err(_) => false,
+        Err(panic) => {
+            error!(
+                "interpreter panicked while running test `{}`: {}",
+                test.name,
+                panic_message(panic.as_ref())
+            );
+            false
+        }
     }
 }
 

@@ -1,11 +1,14 @@
 use std::thread;
 
 use crate::memory::ThreadMemory;
+use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, anyhow, bail};
 use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
-use rustc_public::ty::{ConstantKind, MirConst, RigidTy, TyKind};
+use rustc_public::ty::{
+    Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Ty, TyKind,
+};
 use tracing::{debug, info};
 
 use super::rvalue::write_discriminant;
@@ -63,29 +66,6 @@ pub fn invoke_fn(
         );
     }
 
-    // Tier 3: Shims
-    //
-    // Compiler-generated shims (`rustc_public` collapses them all into
-    // `InstanceKind::Shim`) have no interpretable body via `rustc_public`.
-    // We currently only handle the closure call shim (`FnOnce::call_once`
-    // and friends) by forwarding to the closure body.
-    //
-    // TODO: handle the other shim kinds — most importantly drop glue
-    // (`drop_in_place`), plus clone shims, fn-pointer shims, and vtable
-    // shims. The scalable fix is to obtain the shim's synthesized MIR from
-    // the internal `TyCtxt` (via `run_with_tcx!`) and interpret it uniformly,
-    // rather than hand-implementing each kind. For now, assume any shim we
-    // can resolve to a closure is a closure call shim and reject the rest.
-    if instance.kind == InstanceKind::Shim {
-        if let Some(closure) = closure_call_shim(instance) {
-            return invoke_closure_shim(closure, memory, args, unwinding);
-        }
-        bail!(
-            "Failed to invoke `{}`: compiler-generated shims are not yet supported",
-            instance.name()
-        );
-    }
-
     // Detect implicit arguments (e.g., #[track_caller] passes &Location).
     let fn_abi = instance.fn_abi()?;
     if fn_abi.args.len() > args.len() {
@@ -101,80 +81,60 @@ pub fn invoke_fn(
     // Tier 4: native call via dlsym
     let config = memory.check_config.clone();
     let jit = &memory.jit;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         super::native::call_native(instance, &args, &config, jit)
-    }));
-    match result {
-        Ok(val) => val,
-        Err(panic) => {
-            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "native function panicked".to_string()
-            };
-            bail!("Native call to `{}` panicked: {msg}", instance.name())
-        }
+    }))
+    // Turn the panic payload into the source error, keeping its message, and
+    // layer the call context on top.
+    .map_err(|panic| anyhow!(panic_message(panic.as_ref())))
+    .with_context(|| format!("Native call to `{}` panicked", instance.name()))?
+}
+
+/// Extract a human-readable message from a caught panic payload.
+pub(crate) fn panic_message(panic: &dyn std::any::Any) -> String {
+    if let Some(s) = panic.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "native function panicked".to_string()
     }
 }
 
-/// If `instance` is a closure call shim (`FnOnce/FnMut/Fn::call*`), resolve
-/// the underlying closure body instance.
+/// Resolve a closure call shim (`FnOnce/FnMut/Fn::call*`) to the closure body.
 ///
-/// The shim's first generic argument is the closure type; we resolve it as a
-/// `FnOnce` closure (call shims always consume via the once form at the MIR
-/// level for our purposes).
-fn closure_call_shim(instance: Instance) -> Option<Instance> {
-    use rustc_public::ty::{ClosureKind, GenericArgKind};
-
-    let first = instance.args().0.into_iter().next()?;
+/// The shim's first generic argument is the closure type. We resolve it as
+/// `FnOnce`: every closure can be called by value, so the once form always
+/// yields the closure body regardless of how it captures.
+pub(crate) fn resolve_closure_shim(shim: Instance) -> Result<Instance> {
+    let first = shim
+        .args()
+        .0
+        .first()
+        .cloned()
+        .with_context(|| format!("closure call shim `{}` has no generic args", shim.name()))?;
     let GenericArgKind::Type(ty) = first else {
-        return None;
+        bail!(
+            "closure call shim `{}` has an unexpected first arg: {first:?}",
+            shim.name()
+        );
     };
     let TyKind::RigidTy(RigidTy::Closure(def, args)) = ty.kind() else {
-        return None;
+        bail!("`{}` is not a closure call shim (type {ty:?})", shim.name());
     };
-    let resolved = Instance::resolve_closure(def, &args, ClosureKind::Fn).ok()?;
-    // Guard against non-progress: if resolution returns another shim, we would
-    // recurse forever. Only accept an interpretable body.
-    if resolved.kind == InstanceKind::Shim || !resolved.has_body() {
-        return None;
+    let closure = Instance::resolve_closure(def, &args, ClosureKind::FnOnce)
+        .with_context(|| format!("failed to resolve closure body for `{}`", shim.name()))?;
+
+    // Guard against non-progress: a shim resolving to another shim (or a
+    // bodiless instance) would not be interpretable.
+    if closure.kind == InstanceKind::Shim || !closure.has_body() {
+        bail!(
+            "unsupported shim `{}`: resolved to non-interpretable `{}`",
+            shim.name(),
+            closure.name()
+        );
     }
-    Some(resolved)
-}
-
-/// Invoke a closure body from a call shim.
-///
-/// The closure body takes `(env, args_tuple)` — the same shape the call shim
-/// receives — so the shim is a passthrough. Any missing trailing arguments
-/// (e.g. an omitted `()` args tuple for a no-arg closure) are filled with
-/// zero-initialized values of the expected type.
-fn invoke_closure_shim(
-    closure: Instance,
-    memory: &mut ThreadMemory,
-    mut args: Vec<Value>,
-    unwinding: &mut Option<u16>,
-) -> Result<Value> {
-    use crate::ty::MonoType;
-
-    let body = closure.body().context("closure has no body")?;
-    let arg_locals = body.arg_locals();
-
-    // Fill any trailing arguments the caller didn't supply (e.g. a ZST args
-    // tuple). Non-ZST missing arguments are unsupported.
-    for local in arg_locals.iter().skip(args.len()) {
-        let size = local.ty.size()?;
-        if size != 0 {
-            bail!(
-                "closure shim missing a non-trivial argument of type `{}`",
-                local.ty
-            );
-        }
-        args.push(Value::with_size(size));
-    }
-
-    invoke_fn(closure, memory, args, unwinding)
+    Ok(closure)
 }
 
 impl FnInterpreter<'_> {
@@ -191,11 +151,15 @@ impl FnInterpreter<'_> {
     pub fn execute(mut self, args: Vec<Value>) -> Result<Value> {
         info!("Starting interpretation of {}", self.instance.name());
 
-        // Ensure argument count matches expected
-        debug_assert_eq!(
+        // The caller must supply exactly the arguments the body expects (ABI
+        // normalization such as rust-call untupling happens at the call site).
+        // A mismatch is an interpreter bug, not a user error, so assert rather
+        // than returning a recoverable error.
+        assert_eq!(
             args.len(),
             self.body.arg_locals().len(),
-            "Argument count mismatch: expected {}, got {}",
+            "Argument count mismatch invoking `{}`: expected {}, got {}",
+            self.instance.name(),
             self.body.arg_locals().len(),
             args.len()
         );
@@ -437,25 +401,44 @@ impl FnInterpreter<'_> {
         // Evaluate arguments
         let arg_values: Result<Vec<Value>> =
             args.iter().map(|arg| self.evaluate_operand(arg)).collect();
-        let arg_values = arg_values?;
+        let mut arg_values = arg_values?;
 
-        // Resolve function instance
-        let func_instance = match func {
-            Operand::Constant(const_op) => {
-                // Extract instance from constant type
-                let func_ty = const_op.ty();
-                match func_ty.kind() {
-                    TyKind::RigidTy(RigidTy::FnDef(def_id, args)) => {
-                        Instance::resolve(def_id, &args)?
-                    }
-                    _ => bail!("Unsupported function type: {:?}", func_ty),
-                }
-            }
-            _ => bail!("Only constant function operands supported"),
+        // Resolve function instance from operand type
+        let func_ty = func
+            .ty(self.body.locals())
+            .with_context(|| format!("failed to resolve function type for `{:?}`", func))?;
+
+        let func_instance = match func_ty.kind() {
+            TyKind::RigidTy(RigidTy::FnDef(def_id, args)) => Instance::resolve(def_id, &args)?,
+            _ => bail!("Unsupported function type: {:?}", func_ty),
         };
 
-        // Create new interpreter and call function
-        let result = invoke_fn(func_instance, self.memory, arg_values, self.unwinding)?;
+        // A `rust-call` ABI call (`Fn/FnMut/FnOnce::call*`) bundles its
+        // arguments into a trailing tuple, but the callee body expects them
+        // spread out (`env, arg0, arg1, ...`), so flatten the tuple here.
+        // This applies whether the call devirtualized to the closure body
+        // directly (`Item`) or stayed a call shim; preparing arguments at the
+        // call site keeps `invoke_fn` free of ABI fixups.
+        let is_rust_call = matches!(
+            func_ty.kind().fn_sig().map(|sig| sig.skip_binder().abi),
+            Some(Abi::RustCall)
+        );
+        if is_rust_call && let Some(tuple) = arg_values.pop() {
+            let tuple_ty = args.last().unwrap().ty(self.body.locals())?;
+            arg_values.extend(untuple(&tuple, tuple_ty)?);
+        }
+
+        // A shim callee is (currently) a closure call shim: resolve it to the
+        // closure body before invoking.
+        //
+        // TODO: Handle other shim kinds (drop glue, clone, fn-ptr) here too.
+        let callee = if func_instance.kind == InstanceKind::Shim {
+            resolve_closure_shim(func_instance)?
+        } else {
+            func_instance
+        };
+
+        let result = invoke_fn(callee, self.memory, arg_values, self.unwinding)?;
 
         // Store result in destination
         self.assign_to_place(destination, result)?;
@@ -513,6 +496,32 @@ impl FnInterpreter<'_> {
             }
         }
     }
+}
+
+/// Split a tuple value into its field values, in declaration order.
+///
+/// Used to untuple the `rust-call` ABI argument bundle. A unit tuple yields
+/// an empty list.
+fn untuple(tuple: &Value, tuple_ty: Ty) -> Result<Vec<Value>> {
+    use rustc_public::abi::FieldsShape;
+
+    let TyKind::RigidTy(RigidTy::Tuple(fields)) = tuple_ty.kind() else {
+        bail!("expected a tuple for rust-call args, got `{tuple_ty}`");
+    };
+    let FieldsShape::Arbitrary { offsets } = tuple_ty.layout()?.shape().fields else {
+        bail!("tuple `{tuple_ty}` has no field layout");
+    };
+    let bytes = tuple.as_bytes();
+    let mut values = Vec::with_capacity(fields.len());
+    for (i, field_ty) in fields.iter().enumerate() {
+        let offset = offsets
+            .get(i)
+            .with_context(|| format!("no offset for tuple field {i}"))?
+            .bytes();
+        let size = field_ty.size()?;
+        values.push(Value::from_bytes(&bytes[offset..offset + size]));
+    }
+    Ok(values)
 }
 
 /// Control flow result from executing a terminator instruction.

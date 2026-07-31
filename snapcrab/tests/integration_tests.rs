@@ -4,6 +4,7 @@
 mod common;
 
 mod integration_tests {
+    mod closure_tests;
     mod enum_tests;
     mod intrinsics_tests;
     mod native_tests;
