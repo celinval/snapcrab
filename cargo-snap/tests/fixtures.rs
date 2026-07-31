@@ -1,8 +1,9 @@
 //! Integration tests driving `cargo snap` over mock fixture crates.
 //!
 //! Each fixture is a standalone cargo crate under `tests/fixtures/`. We run
-//! `cargo snap check` on it and assert the exit status matches expectations:
-//! a passing `main` exits 0, a failing (panicking) `main` exits non-zero.
+//! `cargo snap <action>` on it and assert the exit status: the `pass` fixture
+//! (correct `main` and `#[test]`) exits 0, the `fail` fixture (failing `main`
+//! and `#[test]`) exits non-zero.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -17,16 +18,16 @@ fn bin_dir() -> PathBuf {
     cargo_snap_bin().parent().unwrap().to_path_buf()
 }
 
-/// Run `cargo snap check` on a fixture, returning whether it succeeded.
+/// Run `cargo snap <action>` on a fixture, returning whether it succeeded.
 ///
-/// Uses a fresh target dir so the wrapper always re-runs (cargo would
-/// otherwise skip an unchanged crate).
-fn run_fixture(name: &str) -> bool {
+/// Uses a per-(fixture, action) target dir so the wrapper always re-runs
+/// (cargo would otherwise skip an unchanged crate).
+fn run_fixture(name: &str, action: &str) -> bool {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name);
     let manifest = fixture.join("Cargo.toml");
-    let target_dir = std::env::temp_dir().join(format!("cargo-snap-test-{name}"));
+    let target_dir = std::env::temp_dir().join(format!("cargo-snap-test-{name}-{action}"));
 
     // Ensure snapcrab is discoverable next to cargo-snap.
     let snapcrab = bin_dir().join(format!("snapcrab{}", std::env::consts::EXE_SUFFIX));
@@ -42,7 +43,7 @@ fn run_fixture(name: &str) -> bool {
     );
 
     let status = Command::new(cargo_snap_bin())
-        .args(["snap", "run", "--manifest-path"])
+        .args(["snap", action, "--manifest-path"])
         .arg(&manifest)
         .arg("--target-dir")
         .arg(&target_dir)
@@ -54,14 +55,33 @@ fn run_fixture(name: &str) -> bool {
 }
 
 #[test]
-fn fixture_pass_succeeds() {
-    assert!(run_fixture("pass"), "expected `pass` fixture to succeed");
+fn run_pass_succeeds() {
+    assert!(
+        run_fixture("pass", "run"),
+        "expected `pass` fixture main to succeed"
+    );
 }
 
 #[test]
-fn fixture_fail_reports_failure() {
+fn run_fail_reports_failure() {
     assert!(
-        !run_fixture("fail"),
-        "expected `fail` fixture to report a failure"
+        !run_fixture("fail", "run"),
+        "expected `fail` fixture main to report a failure"
+    );
+}
+
+#[test]
+fn test_pass_succeeds() {
+    assert!(
+        run_fixture("pass", "test"),
+        "expected `pass` fixture test to pass"
+    );
+}
+
+#[test]
+fn test_fail_reports_failure() {
+    assert!(
+        !run_fixture("fail", "test"),
+        "expected `fail` fixture test to fail"
     );
 }
