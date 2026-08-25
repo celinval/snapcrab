@@ -399,6 +399,27 @@ impl<'a> FnInterpreter<'a> {
                 }
                 Ok(Value::from_array(&values))
             }
+            AggregateKind::RawPtr(..) => {
+                // Build a raw pointer from a data pointer (operand 0) and its
+                // metadata (operand 1). Thin pointers keep just the address;
+                // wide pointers pack the metadata (slice length or vtable)
+                // alongside it.
+                //
+                // The kind's pointee type and mutability are redundant here.
+                // We have the pointer type (which decides thin vs. wide) from
+                // `rvalue.ty()`, which is exactly `*{mut} pointee`.
+                let data = self.evaluate_operand(&operands[0])?;
+                let ty = rvalue.ty(self.locals())?;
+                if ty.is_wide_ptr() {
+                    let metadata = self.evaluate_operand(&operands[1])?;
+                    Ok(Value::new_wide_ptr(
+                        data.read_uint() as usize,
+                        metadata.read_uint() as usize,
+                    ))
+                } else {
+                    Ok(data)
+                }
+            }
             _ => bail!("Unsupported aggregate kind: {:?}", kind),
         }
     }
