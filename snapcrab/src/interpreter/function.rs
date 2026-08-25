@@ -105,9 +105,11 @@ pub(crate) fn panic_message(panic: &dyn std::any::Any) -> String {
 
 /// Resolve a closure call shim (`FnOnce/FnMut/Fn::call*`) to the closure body.
 ///
-/// The shim's first generic argument is the closure type. We resolve it as
-/// `FnOnce`: every closure can be called by value, so the once form always
-/// yields the closure body regardless of how it captures.
+/// The shim's first generic argument is the closure type. A closure's body is
+/// returned as an interpretable `Item` only when it is resolved at a kind it
+/// directly implements: resolving a non-capturing `Fn` closure as `FnOnce`,
+/// for instance, yields a forwarding shim, not the body. So try the kinds from
+/// most to least capable and take the first that resolves to a real body.
 pub(crate) fn resolve_closure_shim(shim: Instance) -> Result<Instance> {
     let first = shim
         .args()
@@ -124,19 +126,21 @@ pub(crate) fn resolve_closure_shim(shim: Instance) -> Result<Instance> {
     let TyKind::RigidTy(RigidTy::Closure(def, args)) = ty.kind() else {
         bail!("`{}` is not a closure call shim (type {ty:?})", shim.name());
     };
-    let closure = Instance::resolve_closure(def, &args, ClosureKind::FnOnce)
-        .with_context(|| format!("failed to resolve closure body for `{}`", shim.name()))?;
 
-    // Guard against non-progress: a shim resolving to another shim (or a
-    // bodiless instance) would not be interpretable.
-    if closure.kind == InstanceKind::Shim || !closure.has_body() {
-        bail!(
-            "unsupported shim `{}`: resolved to non-interpretable `{}`",
-            shim.name(),
-            closure.name()
-        );
+    for kind in [ClosureKind::Fn, ClosureKind::FnMut, ClosureKind::FnOnce] {
+        // A kind the closure does not directly implement resolves to a shim or
+        // an error; skip those and keep looking for the real body.
+        if let Ok(closure) = Instance::resolve_closure(def, &args, kind)
+            && closure.kind != InstanceKind::Shim
+            && closure.has_body()
+        {
+            return Ok(closure);
+        }
     }
-    Ok(closure)
+    bail!(
+        "could not resolve `{}` to an interpretable closure body",
+        shim.name()
+    );
 }
 
 impl FnInterpreter<'_> {
