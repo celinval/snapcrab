@@ -29,28 +29,21 @@ check_custom_start!(
 // --- Calls through generic bounds (routes via a call shim) ---
 //
 // Owning a closure inside the callee makes it responsible for dropping it,
-// which emits a `Drop` terminator the interpreter does not handle yet. The
-// `_once` case takes a `Copy` closure by value and avoids the drop.
+// which emits a `Drop` terminator handled by the drop glue support.
 
 check_custom_start!(
-    // TODO: Requires `Drop` terminator support (drop glue).
-    #[ignore]
     test_closure_generic_fn,
     input = "closures.rs",
     start_fn = "generic_fn",
 );
 
 check_custom_start!(
-    // TODO: Requires `Drop` terminator support (drop glue).
-    #[ignore]
     test_closure_generic_fn_capture,
     input = "closures.rs",
     start_fn = "generic_fn_capture",
 );
 
 check_custom_start!(
-    // TODO: Requires `Drop` terminator support (drop glue).
-    #[ignore]
     test_closure_generic_fn_mut,
     input = "closures.rs",
     start_fn = "generic_fn_mut",

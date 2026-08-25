@@ -5,7 +5,9 @@ use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, anyhow, bail};
 use rustc_public::mir::mono::{Instance, InstanceKind};
-use rustc_public::mir::{BasicBlockIdx, Body, Operand, Place, StatementKind, TerminatorKind};
+use rustc_public::mir::{
+    BasicBlockIdx, Body, Mutability, Operand, Place, StatementKind, TerminatorKind,
+};
 use rustc_public::ty::{
     Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Ty, TyKind,
 };
@@ -382,6 +384,10 @@ impl FnInterpreter<'_> {
                     bail!("Assertion failed: {}", msg_str);
                 }
             }
+            TerminatorKind::Drop { place, target, .. } => {
+                self.execute_drop(&place)?;
+                Ok(ControlFlow::Continue(target))
+            }
             TerminatorKind::Unreachable => {
                 bail!("Entered unreachable code");
             }
@@ -428,12 +434,19 @@ impl FnInterpreter<'_> {
             arg_values.extend(untuple(&tuple, tuple_ty)?);
         }
 
-        // A shim callee is (currently) a closure call shim: resolve it to the
-        // closure body before invoking.
+        // Resolve shim callees to something interpretable. Drop glue (e.g. a
+        // direct `drop_in_place` call from `ManuallyDrop::drop`) carries its
+        // own monomorphized MIR, so interpret it directly. Closure call shims
+        // (`Fn/FnMut/FnOnce::call*`) have no body of their own and must be
+        // redirected to the closure body first.
         //
-        // TODO: Handle other shim kinds (drop glue, clone, fn-ptr) here too.
+        // TODO: Handle remaining shim kinds (clone, fn-ptr) here too.
         let callee = if func_instance.kind == InstanceKind::Shim {
-            resolve_closure_shim(func_instance)?
+            if func_instance.has_body() {
+                func_instance
+            } else {
+                resolve_closure_shim(func_instance)?
+            }
         } else {
             func_instance
         };
@@ -443,6 +456,35 @@ impl FnInterpreter<'_> {
         // Store result in destination
         self.assign_to_place(destination, result)?;
 
+        Ok(())
+    }
+
+    /// Run the drop glue for the value held in `place`.
+    ///
+    /// A `Drop` terminator lowers to `drop_in_place::<T>(&mut *place)`. We
+    /// resolve that glue instance and invoke it with a `*mut T` to the place.
+    /// The monomorphized glue body drives the rest: it calls the user
+    /// `Drop::drop` impl (if any) and emits nested `Drop` terminators for the
+    /// value's fields, which recurse back through this handler.
+    fn execute_drop(&mut self, place: &Place) -> Result<()> {
+        let place_ty = place
+            .ty(self.body.locals())
+            .with_context(|| format!("failed to resolve type of drop place `{place:?}`"))?;
+
+        let drop_instance = Instance::resolve_drop_in_place(place_ty);
+
+        // Types that need no cleanup resolve to an empty shim; skipping it
+        // avoids an interpreter round-trip and matches codegen behavior.
+        if drop_instance.is_empty_shim() {
+            return Ok(());
+        }
+
+        // Build the `*mut T` argument. `place_to_ptr` carries wide-pointer
+        // metadata for unsized drops (e.g. `[T]`, `dyn Trait`).
+        let ptr_ty = Ty::new_ptr(place_ty, Mutability::Mut);
+        let ptr = self.place_to_ptr(place, ptr_ty)?;
+
+        invoke_fn(drop_instance, self.memory, vec![ptr], self.unwinding)?;
         Ok(())
     }
 
