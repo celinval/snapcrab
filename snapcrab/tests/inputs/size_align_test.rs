@@ -57,3 +57,20 @@ pub fn static_alignment() {
     assert!(addr & 31 == 0, "static address not aligned to 32 bytes");
     assert!(OVER_ALIGNED_STATIC.0[0] == 9);
 }
+
+/// A `#[repr(C)]` struct with interior padding between its fields; those
+/// padding bytes are uninitialized in the static's allocation.
+#[repr(C)]
+pub struct Padded {
+    a: u8,
+    b: u64,
+}
+
+static PADDED_STATIC: Padded = Padded { a: 0x11, b: 0xBEEF };
+
+/// Field values of a static must survive materialization even when the
+/// allocation contains uninitialized padding bytes.
+pub fn padded_static_value() {
+    assert!(PADDED_STATIC.a == 0x11);
+    assert!(PADDED_STATIC.b == 0xBEEF);
+}

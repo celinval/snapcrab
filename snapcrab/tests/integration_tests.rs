@@ -236,6 +236,12 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_padded_static_value,
+    input = "size_align_test.rs",
+    start_fn = "padded_static_value",
+);
+
+check_custom_start!(
     test_error_deep_call,
     input = "diagnostic_test.rs",
     start_fn = "error_deep_call",

@@ -78,15 +78,17 @@ impl Statics {
     fn materialize_alloc(&self, alloc_id: AllocId, alloc: &rustc_public::ty::Allocation) -> usize {
         let id_idx = alloc_id.to_index();
 
-        let bytes = match alloc.raw_bytes() {
-            Ok(b) => b,
-            Err(_) => vec![0; alloc.bytes.len()],
-        };
-
         // Materialize into an aligned buffer so pointers into the allocation
-        // honour its declared alignment.
-        let mut buf = AlignedBuf::zeroed(bytes.len(), alloc.align as usize);
-        buf.copy_from_slice(&bytes);
+        // honour its declared alignment. Copy each initialized byte and leave
+        // uninitialized bytes (e.g. struct padding) zeroed; `raw_bytes` is
+        // all-or-nothing and would otherwise force the whole value to zero
+        // whenever any padding byte is uninitialized.
+        let mut buf = AlignedBuf::zeroed(alloc.bytes.len(), alloc.align as usize);
+        for (i, byte) in alloc.bytes.iter().enumerate() {
+            if let Some(b) = byte {
+                buf[i] = *b;
+            }
+        }
 
         // Resolve provenance: patch pointer-sized segments with real addresses.
         let ptr_size = crate::memory::pointer_width();
