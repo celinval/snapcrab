@@ -7,6 +7,7 @@
 //! - Read and write to all memory segments are validated to avoid access out of
 //!   bounds.
 
+mod aligned;
 pub mod heap;
 mod sanitizer;
 mod stack;

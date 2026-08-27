@@ -7,6 +7,7 @@
 //! materialize allocations lazily while the interpreter holds shared references.
 
 use crate::interpreter::native;
+use crate::memory::aligned::AlignedBuf;
 use crate::memory::sanitizer::MemorySanitizer;
 use crate::memory::{MemoryAccessError, MemorySegment};
 use crate::ty::contains_mutable_ptr;
@@ -28,10 +29,11 @@ pub struct Statics {
 struct StaticsInner {
     /// Backing storage for materialized allocations.
     ///
-    /// Each entry is a `Box<[u8]>` whose heap pointer remains stable regardless of
-    /// how the outer `Vec` grows — pushing new entries may move the `Box` structs,
-    /// but not the heap buffers they point to.
-    allocations: Vec<Box<[u8]>>,
+    /// Each entry is an `AlignedBuf` whose heap pointer remains stable regardless
+    /// of how the outer `Vec` grows — pushing new entries may move the structs,
+    /// but not the heap buffers they point to. Each buffer honours its
+    /// allocation's alignment so pointers into it are correctly aligned.
+    allocations: Vec<AlignedBuf>,
     /// Maps AllocId index to the index in `allocations`.
     alloc_map: HashMap<usize, usize>,
     /// Tracks which addresses belong to us for bounds checking.
@@ -81,7 +83,10 @@ impl Statics {
             Err(_) => vec![0; alloc.bytes.len()],
         };
 
-        let mut buf = bytes;
+        // Materialize into an aligned buffer so pointers into the allocation
+        // honour its declared alignment.
+        let mut buf = AlignedBuf::zeroed(bytes.len(), alloc.align as usize);
+        buf.copy_from_slice(&bytes);
 
         // Resolve provenance: patch pointer-sized segments with real addresses.
         let ptr_size = crate::memory::pointer_width();
@@ -95,14 +100,14 @@ impl Statics {
             buf[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
         }
 
-        let boxed: Box<[u8]> = buf.into_boxed_slice();
-        let addr = boxed.as_ptr() as usize;
-        let len = boxed.len();
+        let addr = buf.as_ptr() as usize;
+        let len = buf.len();
 
         let mut inner = self.inner.borrow_mut();
         let alloc_idx = inner.allocations.len();
-        inner.allocations.push(boxed);
-        // SAFETY: Box heap pointer remains stable after push (only the Box struct moves).
+        inner.allocations.push(buf);
+        // SAFETY: the buffer's heap pointer remains stable after push (only the
+        // `AlignedBuf` struct moves, not the allocation it owns).
         let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, len) };
         inner.sanitizer.register_alloc(slice);
         inner.alloc_map.insert(id_idx, alloc_idx);

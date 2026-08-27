@@ -224,6 +224,18 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_local_alignment,
+    input = "size_align_test.rs",
+    start_fn = "local_alignment",
+);
+
+check_custom_start!(
+    test_static_alignment,
+    input = "size_align_test.rs",
+    start_fn = "static_alignment",
+);
+
+check_custom_start!(
     test_error_deep_call,
     input = "diagnostic_test.rs",
     start_fn = "error_deep_call",

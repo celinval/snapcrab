@@ -13,6 +13,7 @@
 //! - It makes it harder to check for buffer overflow.
 
 use super::ThreadMemory;
+use crate::memory::aligned::AlignedBuf;
 use crate::memory::sanitizer::MemorySanitizer;
 use crate::memory::{MemoryAccessError, MemorySegment};
 use crate::ty::MonoType;
@@ -100,8 +101,10 @@ impl Stack {
 /// Variables are stored as raw bytes at calculated offsets.
 #[derive(Debug)]
 pub struct StackFrame {
-    /// Contiguous byte buffer for all locals. Heap address is stable.
-    data: Box<[u8]>,
+    /// Contiguous byte buffer for all locals. Heap address is stable and
+    /// aligned to the largest local's alignment, so each local's absolute
+    /// address (base + offset) honours its own alignment.
+    data: AlignedBuf,
     /// Maps local to the data[offset].
     offsets: Vec<usize>,
 }
@@ -114,6 +117,7 @@ impl StackFrame {
     pub fn new(body: &Body) -> Self {
         let mut offsets = Vec::new();
         let mut current_offset = 0;
+        let mut max_align = 1;
 
         for local in body.locals() {
             let size = local
@@ -130,9 +134,12 @@ impl StackFrame {
 
             offsets.push(current_offset);
             current_offset += size;
+            max_align = max_align.max(alignment);
         }
 
-        let data = vec![0; current_offset].into_boxed_slice();
+        // Align the frame base to the largest local so offset-relative
+        // alignment translates to absolute alignment.
+        let data = AlignedBuf::zeroed(current_offset, max_align);
 
         Self { data, offsets }
     }
