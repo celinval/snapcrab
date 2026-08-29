@@ -5,9 +5,13 @@
 # IDE files
 .vscode/
 .idea/
+.zed/
 *.swp
 *.swo
 *~
+
+# Rust build artifacts for quick tests
+*.rlib
 
 # OS files
 .DS_Store
