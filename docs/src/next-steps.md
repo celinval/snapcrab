@@ -11,6 +11,7 @@ A lot of the coverage we will add as we try more complex examples.
 - Intrinsics
 - DST (partial — slices work, `dyn Trait` not yet supported)
 - Crate loading
+- `#[track_caller]` implicit argument support (requires nightly-2026-07-31 or later)
 
 
 ## Native calls
@@ -19,7 +20,6 @@ A lot of the coverage we will add as we try more complex examples.
 - Symbol caching (avoid repeated `dlsym` lookups)
 - Trampoline caching (reuse compiled trampolines for identical signatures)
 - Function pointer callbacks (native → interpreter via JIT stubs)
-- `#[track_caller]` implicit argument support
 
 ## RustC Public
 
