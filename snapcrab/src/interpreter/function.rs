@@ -15,6 +15,14 @@ use tracing::{debug, info};
 
 use super::rvalue::write_discriminant;
 
+const ALLOC_SHIMS: &[&str] = &[
+    "__rust_alloc",
+    "__rust_alloc_zeroed",
+    "__rust_dealloc",
+    "__rust_realloc",
+    "__rust_no_alloc_shim_is_unstable_v2",
+];
+
 /// Function interpreter that executes MIR (Mid-level Intermediate Representation) code.
 ///
 /// The interpreter maintains a stack frame for local variables and executes basic blocks
@@ -34,10 +42,11 @@ pub struct FnInterpreter<'a> {
 
 /// Run the interpreter for the given instance.
 ///
-/// Uses a three-tier dispatch:
+/// Uses a four-tier dispatch:
 /// 1. If the function has a MIR body, interpret it
 /// 2. If it's an intrinsic without a body, shim it
-/// 3. Otherwise, call the native compiled version via symbol resolution
+/// 3. If it's a Rust allocator shim, service it from our `Heap`
+/// 4. Otherwise, call the native compiled version via symbol resolution
 pub fn invoke_fn(
     instance: Instance,
     memory: &mut ThreadMemory,
@@ -66,6 +75,16 @@ pub fn invoke_fn(
             instance,
             &memory.check_config,
         );
+    }
+
+    // Tier 3: Rust allocator shims -- Use our Heap abstraction.
+    let name = instance.name();
+    let base = name
+        .rsplit_once("::")
+        .map(|(_, fn_name)| fn_name)
+        .unwrap_or(name.as_str());
+    if ALLOC_SHIMS.contains(&base) {
+        return eval_alloc_shim(base, &args, memory);
     }
 
     // Detect implicit arguments (e.g., #[track_caller] passes &Location).
@@ -541,6 +560,55 @@ impl FnInterpreter<'_> {
                 bail!("Unexpected unevaluated constants on instance body");
             }
         }
+    }
+}
+
+/// Interpret Rust allocator shims (`__rust_[*]alloc` functions).
+///
+/// These shims are meant to glue allocation functions with the global allocator.
+/// We intercept them here and modeled after our `Heap` abstraction.
+fn eval_alloc_shim(name: &str, args: &[Value], memory: &ThreadMemory) -> Result<Value> {
+    let usize_arg = |i: usize| -> Result<usize> {
+        Ok(args
+            .get(i)
+            .with_context(|| {
+                format!(
+                    "Internal Error: Missing arg `{i}` for `{name}`. Only found {} args.",
+                    args.len()
+                )
+            })?
+            .read_uint() as usize)
+    };
+    match name {
+        // `fn(size, align) -> *mut u8`. Both allocators zero their memory (see
+        // `heap`), so they share one path.
+        "__rust_alloc" | "__rust_alloc_zeroed" => {
+            let size = usize_arg(0)?;
+            let align = usize_arg(1)?;
+            let addr = memory.heap_allocate(size, align)?;
+            Ok(Value::from_type(addr))
+        }
+        // `fn(ptr, size, align)`.
+        "__rust_dealloc" => {
+            let ptr = usize_arg(0)?;
+            let size = usize_arg(1)?;
+            let align = usize_arg(2)?;
+            memory
+                .heap_deallocate(ptr, size, align)
+                .map(|()| Value::unit().clone())
+        }
+        // `fn(ptr, old_size, align, new_size) -> *mut u8`.
+        "__rust_realloc" => {
+            let ptr = usize_arg(0)?;
+            let old_size = usize_arg(1)?;
+            let align = usize_arg(2)?;
+            let new_size = usize_arg(3)?;
+            let result = memory.heap_reallocate(ptr, old_size, align, new_size);
+            result.map(Value::from_type)
+        }
+        // A link-time marker with no runtime effect.
+        "__rust_no_alloc_shim_is_unstable_v2" => Ok(Value::unit().clone()),
+        _ => bail!("Internal Error: unknown allocator shim `{name}`"),
     }
 }
 

@@ -45,7 +45,6 @@ pub fn machine_info() -> &'static MachineInfo {
 /// This is the main structure exported to the rest of the interpreter.
 pub struct ThreadMemory {
     stack: Stack,
-    #[allow(unused)]
     heap: Heap,
     statics: Statics,
     /// Configuration for which UB checks to perform.
@@ -87,6 +86,28 @@ impl ThreadMemory {
         self.statics.resolve_alloc(alloc_id)
     }
 
+    /// Service a `__rust_alloc`/`__rust_alloc_zeroed` request, returning the
+    /// base address of a fresh, correctly-aligned heap block.
+    pub fn heap_allocate(&self, size: usize, align: usize) -> Result<usize> {
+        self.heap.allocate(size, align)
+    }
+
+    /// Service a `__rust_dealloc` request for a live heap allocation.
+    pub fn heap_deallocate(&self, address: usize, size: usize, align: usize) -> Result<()> {
+        self.heap.deallocate(address, size, align)
+    }
+
+    /// Service a `__rust_realloc` request, returning the new base address.
+    pub fn heap_reallocate(
+        &self,
+        address: usize,
+        old_size: usize,
+        align: usize,
+        new_size: usize,
+    ) -> Result<usize> {
+        self.heap.reallocate(address, old_size, align, new_size)
+    }
+
     /// Read local variable.
     #[inline]
     #[allow(dead_code)]
@@ -122,7 +143,7 @@ impl ThreadMemory {
 
         // Try stack first
         match self.stack.read_addr(address, size) {
-            Ok(data) => return Ok(Value::from_bytes(data)),
+            Ok(value) => return Ok(value),
             Err(MemoryAccessError::OutOfBounds) => {
                 anyhow::bail!(
                     "Stack memory access out of bounds at address 0x{:x}",
@@ -134,7 +155,7 @@ impl ThreadMemory {
 
         // Try heap
         match self.heap.read_addr(address, size) {
-            Ok(data) => return Ok(Value::from_bytes(data)),
+            Ok(value) => return Ok(value),
             Err(MemoryAccessError::OutOfBounds) => {
                 anyhow::bail!(
                     "Heap memory access out of bounds at address 0x{:x}",
@@ -146,7 +167,7 @@ impl ThreadMemory {
 
         // Try statics
         match self.statics.read_addr(address, size) {
-            Ok(data) => Ok(Value::from_bytes(data)),
+            Ok(value) => Ok(value),
             Err(MemoryAccessError::OutOfBounds) => {
                 anyhow::bail!(
                     "Static memory access out of bounds at address 0x{:x}",
@@ -255,16 +276,20 @@ impl std::error::Error for MemoryAccessError {}
 /// - That returned memory references remain valid for their lifetime
 /// - That concurrent access is properly synchronized if needed
 unsafe trait MemorySegment {
-    /// Reads data from a memory address.
+    /// Reads data from a memory address into an owned value.
+    ///
+    /// Returns an owned `Value` (not a borrow) so the bytes are copied out
+    /// while the segment's backing allocation is guaranteed live: a borrowed
+    /// slice could dangle once the allocation is freed (e.g. heap dealloc).
     ///
     /// # Arguments
     /// * `address` - The memory address to read from
     /// * `size` - Number of bytes to read
     ///
     /// # Returns
-    /// * `Ok(&[u8])` - Reference to the memory data if the read is valid
+    /// * `Ok(Value)` - Copy of the memory data if the read is valid
     /// * `Err` - Error found when trying to satisfy the request
-    fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError>;
+    fn read_addr(&self, address: usize, size: usize) -> Result<Value, MemoryAccessError>;
 
     /// Writes data to a memory address.
     ///

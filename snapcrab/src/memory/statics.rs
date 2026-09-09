@@ -11,6 +11,7 @@ use crate::memory::aligned::AlignedBuf;
 use crate::memory::sanitizer::MemorySanitizer;
 use crate::memory::{MemoryAccessError, MemorySegment};
 use crate::ty::contains_mutable_ptr;
+use crate::value::Value;
 use rustc_public::mir::Mutability;
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::{Instance, StaticDef};
@@ -83,7 +84,8 @@ impl Statics {
         // uninitialized bytes (e.g. struct padding) zeroed; `raw_bytes` is
         // all-or-nothing and would otherwise force the whole value to zero
         // whenever any padding byte is uninitialized.
-        let mut buf = AlignedBuf::zeroed(alloc.bytes.len(), alloc.align as usize);
+        let mut buf = AlignedBuf::zeroed(alloc.bytes.len(), alloc.align as usize)
+            .expect("static allocation layout from verified compiler data");
         for (i, byte) in alloc.bytes.iter().enumerate() {
             if let Some(b) = byte {
                 buf[i] = *b;
@@ -143,14 +145,16 @@ fn check_static_not_duplicated(def: StaticDef) -> anyhow::Result<()> {
 // SAFETY: Allocations are stored in Box<[u8]> that are never moved or reallocated
 // after creation. The sanitizer tracks their addresses for bounds checking.
 unsafe impl MemorySegment for Statics {
-    fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError> {
+    fn read_addr(&self, address: usize, size: usize) -> Result<Value, MemoryAccessError> {
         let inner = self.inner.borrow();
         if !inner.sanitizer.contains(address, size) {
             return Err(MemoryAccessError::NotFound);
         }
         let ptr = address as *const u8;
-        // SAFETY: sanitizer confirmed the range is within a live allocation.
-        Ok(unsafe { std::slice::from_raw_parts(ptr, size) })
+        // SAFETY: sanitizer confirmed the range is within a live allocation;
+        // the bytes are copied into an owned `Value` before returning.
+        let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
+        Ok(Value::from_bytes(slice))
     }
 
     fn write_addr(&self, _address: usize, _data: &[u8]) -> Result<(), MemoryAccessError> {

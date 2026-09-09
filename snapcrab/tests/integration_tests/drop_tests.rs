@@ -50,8 +50,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    // TODO: Requires heap allocation support (`Box::new` is unsupported).
-    #[ignore]
     test_drop_box,
     input = "drop_semantics.rs",
     start_fn = "box_drop",

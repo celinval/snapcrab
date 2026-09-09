@@ -34,10 +34,12 @@ pub struct Stack {
 // stable for the frame's lifetime. The sanitizer tracks these allocations and
 // validates that all accesses fall within registered ranges.
 unsafe impl MemorySegment for Stack {
-    fn read_addr(&self, address: usize, size: usize) -> Result<&[u8], MemoryAccessError> {
+    fn read_addr(&self, address: usize, size: usize) -> Result<Value, MemoryAccessError> {
         self.sanitizer.check_access(address, size)?;
-        // SAFETY: check_access verified the range is within a live allocation.
-        Ok(unsafe { std::slice::from_raw_parts(address as *const u8, size) })
+        // SAFETY: check_access verified the range is within a live allocation;
+        // the bytes are copied into an owned `Value` before returning.
+        let slice = unsafe { std::slice::from_raw_parts(address as *const u8, size) };
+        Ok(Value::from_bytes(slice))
     }
 
     fn write_addr(&self, address: usize, data: &[u8]) -> Result<(), MemoryAccessError> {
@@ -138,8 +140,10 @@ impl StackFrame {
         }
 
         // Align the frame base to the largest local so offset-relative
-        // alignment translates to absolute alignment.
-        let data = AlignedBuf::zeroed(current_offset, max_align);
+        // alignment translates to absolute alignment. Local layouts come from
+        // the verified compiler body, so the layout is always valid.
+        let data = AlignedBuf::zeroed(current_offset, max_align)
+            .expect("stack frame layout from verified compiler data");
 
         Self { data, offsets }
     }

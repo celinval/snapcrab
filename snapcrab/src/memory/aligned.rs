@@ -8,6 +8,7 @@
 //! explicit `Layout`, so the base address honours the requested alignment by
 //! construction.
 
+use anyhow::{Result, anyhow};
 use std::alloc::{self, Layout};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
@@ -26,11 +27,13 @@ pub(super) struct AlignedBuf {
 impl AlignedBuf {
     /// Allocate a zeroed buffer of `size` bytes aligned to `align`.
     ///
-    /// `align` must be a non-zero power of two, as guaranteed by type layouts
-    /// and compiler allocations.
-    pub(super) fn zeroed(size: usize, align: usize) -> Self {
+    /// Errors if `size`/`align` do not form a valid layout (`align` not a
+    /// non-zero power of two, or the size rounded up to `align` overflowing
+    /// `isize`). These values may originate from the interpreted program (heap
+    /// allocation), so an invalid request is an error rather than a bug.
+    pub(super) fn zeroed(size: usize, align: usize) -> Result<Self> {
         let layout = Layout::from_size_align(size, align)
-            .unwrap_or_else(|e| panic!("invalid layout (size {size}, align {align}): {e}"));
+            .map_err(|e| anyhow!("invalid layout (size {size}, align {align}): {e}"))?;
         let ptr = if size == 0 {
             // No allocation for a zero-sized buffer; an aligned, non-null
             // dangling pointer is valid for zero-length slices.
@@ -40,12 +43,33 @@ impl AlignedBuf {
             let raw = unsafe { alloc::alloc_zeroed(layout) };
             NonNull::new(raw).unwrap_or_else(|| alloc::handle_alloc_error(layout))
         };
-        Self { ptr, layout }
+        Ok(Self { ptr, layout })
     }
 
     /// The buffer's base address as a const pointer.
     pub(super) fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
+    }
+
+    /// The buffer's base address as a mutable pointer.
+    ///
+    /// Takes `&self` because the interpreter writes to buffers through raw
+    /// addresses rather than through this handle; the sanitizer, not the borrow
+    /// checker, is what keeps those writes in bounds.
+    pub(super) fn as_mut_ptr(&self) -> *mut u8 {
+        self.ptr.as_ptr()
+    }
+
+    /// The buffer's contents as a byte slice spanning its full layout.
+    pub(super) fn as_bytes(&self) -> &[u8] {
+        // SAFETY: `ptr` is non-null, initialized and valid for `layout.size()` bytes.
+        // Alignment of `[u8]` is 1.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.layout.size()) }
+    }
+
+    /// Retrieve the memory layout of the buffer.
+    pub(super) fn layout(&self) -> Layout {
+        self.layout
     }
 }
 
@@ -87,7 +111,7 @@ mod tests {
         // the buffer's alignment cannot be attributed to incidental over-
         // alignment.
         for align in [1usize, 2, 4, 8, 16, 32, 64, 128, 4096] {
-            let buf = AlignedBuf::zeroed(align * 3 + 1, align);
+            let buf = AlignedBuf::zeroed(align * 3 + 1, align).unwrap();
             assert_eq!(
                 buf.as_ptr() as usize % align,
                 0,
@@ -99,20 +123,28 @@ mod tests {
 
     #[test]
     fn is_zero_initialized() {
-        let buf = AlignedBuf::zeroed(64, 16);
+        let buf = AlignedBuf::zeroed(64, 16).unwrap();
         assert!(buf.iter().all(|&b| b == 0));
     }
 
     #[test]
     fn reads_back_written_bytes() {
-        let mut buf = AlignedBuf::zeroed(4, 4);
+        let mut buf = AlignedBuf::zeroed(4, 4).unwrap();
         buf.copy_from_slice(&[1, 2, 3, 4]);
         assert_eq!(&*buf, &[1, 2, 3, 4]);
     }
 
     #[test]
+    fn invalid_layout_errors() {
+        // Non-power-of-two alignment and an overflowing size are rejected
+        // rather than panicking.
+        assert!(AlignedBuf::zeroed(8, 3).is_err());
+        assert!(AlignedBuf::zeroed(isize::MAX as usize + 1, 1).is_err());
+    }
+
+    #[test]
     fn zero_sized_is_aligned_and_empty() {
-        let buf = AlignedBuf::zeroed(0, 16);
+        let buf = AlignedBuf::zeroed(0, 16).unwrap();
         assert_eq!(buf.len(), 0);
         assert_eq!(buf.as_ptr() as usize % 16, 0);
     }
