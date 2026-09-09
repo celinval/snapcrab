@@ -3,7 +3,10 @@
 //! Intrinsics that don't have MIR fallback bodies are handled here.
 //! This is the irreducible set that neither interpretation nor native calls can provide.
 
+use std::mem;
+
 use crate::interpreter::check::{CheckConfig, validate_value};
+use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use rustc_public::mir::mono::Instance;
@@ -45,12 +48,45 @@ pub fn eval_intrinsic(
             }
             Ok(Value::unit().clone())
         }
-        "needs_drop" => {
-            // `T` needs drop glue unless its `drop_in_place` resolves to an
-            // empty shim (no destructor to run, transitively).
+        // `size_of_val::<T>(ptr)` / `min_align_of_val::<T>(ptr)`: for sized `T`
+        // the pointer is irrelevant; for unsized `T` the size comes from the
+        // pointer's metadata (slice length, `str` byte length).
+        "size_of_val" => {
             let ty = intrinsic_type_arg(instance, 0)?;
-            let needs_drop = !Instance::resolve_drop_in_place(ty).is_empty_shim();
-            Ok(Value::from_bool(needs_drop))
+            Ok(Value::from_type(size_of_val(ty, &args[0])?))
+        }
+        "align_of_val" | "min_align_of_val" => {
+            let ty = intrinsic_type_arg(instance, 0)?;
+            Ok(Value::from_type(align_of_val(ty, &args[0])?))
+        }
+        // count ones -- read_uint extend integer with "0" bits, then count ones
+        "ctpop" => Ok(Value::from_type(args[0].read_uint().count_ones())),
+
+        "cttz" | "cttz_nonzero" => {
+            let x = args[0].read_uint();
+            if x == 0 {
+                if name == "cttz_nonzero" {
+                    bail!("`intrinsics::cttz_nonzero` called with zero, which is UB");
+                }
+                let bits = (args[0].len() * 8) as u32;
+                Ok(Value::from_type(bits))
+            } else {
+                Ok(Value::from_type(x.trailing_zeros()))
+            }
+        }
+        "ctlz" | "ctlz_nonzero" => {
+            let bits = (args[0].len() * 8) as u32;
+            let significant = u128::BITS - args[0].read_uint().leading_zeros();
+            let leading_zeros = bits - significant;
+            if leading_zeros == bits && name == "ctlz_nonzero" {
+                bail!("`intrinsics::ctlz_nonzero` called with zero, which is UB");
+            }
+            Ok(Value::from_type(leading_zeros))
+        }
+        "needs_drop" => {
+            // Per the spec, this should be resolved statically.
+            // https://doc.rust-lang.org/std/intrinsics/fn.needs_drop.html
+            unreachable!("internal error: unexpected `intrinsics::needs_drop` call.");
         }
         "black_box" => Ok(args[0].clone()),
         _ => bail!("Unimplemented intrinsic `{name}` in `{}`", instance.name()),
@@ -120,6 +156,46 @@ fn is_uninhabited(ty: Ty) -> Result<bool> {
             }
         },
         _ => Ok(false),
+    }
+}
+
+/// Compute `size_of_val` for `ty` given a (possibly wide) pointer to it.
+///
+/// Sized types ignore the pointer; unsized slices and `str` read their length
+/// from the pointer's metadata.
+///
+/// TODO: Other unsized types (e.g. `dyn Trait`) are not yet supported.
+fn size_of_val(ty: Ty, ptr: &Value) -> Result<usize> {
+    match ty.kind() {
+        TyKind::RigidTy(RigidTy::Slice(elem)) => {
+            let len = ptr.ptr_metadata()?.read_uint() as usize;
+            // The length comes from the interpreted program, so an absurd
+            // slice metadata must not wrap into a plausible size.
+            len.checked_mul(elem.size()?).with_context(|| {
+                format!("slice of {len} `{elem}` elements overflows the address space")
+            })
+        }
+        TyKind::RigidTy(RigidTy::Str) => Ok(ptr.ptr_metadata()?.read_uint() as usize),
+        TyKind::RigidTy(RigidTy::Dynamic(..)) => {
+            bail!("`intrinsics::size_of_val` does not yet support `dyn Trait` types")
+        }
+        _ => ty.size(),
+    }
+}
+
+/// Compute `align_of_val` for `ty` given a (possibly wide) pointer to it.
+///
+/// Sized types ignore the pointer; unsized slices and `str` return the alignment of their elements.
+///
+/// TODO: Other unsized types (e.g. `dyn Trait`) are not yet supported.
+fn align_of_val(ty: Ty, _ptr: &Value) -> Result<usize> {
+    match ty.kind() {
+        TyKind::RigidTy(RigidTy::Slice(elem)) => elem.alignment(),
+        TyKind::RigidTy(RigidTy::Str) => Ok(mem::align_of::<u8>()),
+        TyKind::RigidTy(RigidTy::Dynamic(..)) => {
+            bail!("`intrinsics::align_of_val` does not yet support `dyn Trait` types")
+        }
+        _ => ty.alignment(),
     }
 }
 

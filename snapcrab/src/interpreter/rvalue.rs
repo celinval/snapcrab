@@ -123,15 +123,17 @@ where
     let left = l.as_type::<T>().unwrap();
     let right = r.as_type::<T>().unwrap();
     match op {
-        BinOp::Add => left
+        // Unchecked variants are UB on overflow, so detecting it (via the
+        // checked op) is a sound, stricter interpretation.
+        BinOp::Add | BinOp::AddUnchecked => left
             .checked_add(&right)
             .map(Value::from_type)
             .with_context(|| format!("Attempt to {op:?} with overflow")),
-        BinOp::Sub => left
+        BinOp::Sub | BinOp::SubUnchecked => left
             .checked_sub(&right)
             .map(Value::from_type)
             .with_context(|| format!("Attempt to {op:?} with overflow")),
-        BinOp::Mul => left
+        BinOp::Mul | BinOp::MulUnchecked => left
             .checked_mul(&right)
             .map(Value::from_type)
             .with_context(|| format!("Attempt to {op:?} with overflow")),

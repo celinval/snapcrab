@@ -87,3 +87,63 @@ check_custom_start!(
         r".*Assertion failed.*construct an enum from an invalid value.*".to_string()
     )
 );
+
+// --- Bit-counting intrinsics (ctpop / cttz / ctlz and their nonzero forms) ---
+
+check_custom_start!(
+    test_ctpop,
+    input = "intrinsics/bit_ops.rs",
+    start_fn = "count_ones",
+);
+
+check_custom_start!(
+    test_cttz,
+    input = "intrinsics/bit_ops.rs",
+    start_fn = "trailing_zeros",
+);
+
+check_custom_start!(
+    test_ctlz,
+    input = "intrinsics/bit_ops.rs",
+    start_fn = "leading_zeros",
+);
+
+check_custom_start!(
+    test_ctlz_cttz_nonzero,
+    input = "intrinsics/bit_ops.rs",
+    start_fn = "nonzero_bit_ops",
+);
+
+// --- size_of_val / align_of_val ---
+
+check_custom_start!(
+    test_size_of_val,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "size_of_val",
+);
+
+check_custom_start!(
+    test_align_of_val,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "align_of_val",
+);
+
+// --- Unchecked integer arithmetic ---
+
+check_custom_start!(
+    test_unchecked_add,
+    input = "intrinsics/unchecked_arith.rs",
+    start_fn = "unchecked_add",
+);
+
+check_custom_start!(
+    test_unchecked_sub,
+    input = "intrinsics/unchecked_arith.rs",
+    start_fn = "unchecked_sub",
+);
+
+check_custom_start!(
+    test_unchecked_mul,
+    input = "intrinsics/unchecked_arith.rs",
+    start_fn = "unchecked_mul",
+);

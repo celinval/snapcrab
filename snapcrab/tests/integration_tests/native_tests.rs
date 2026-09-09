@@ -430,7 +430,7 @@ check_extern_crate!(
 // --- Rust ABI: SIMD vectors (Direct with ValueAbi::Vector) ---
 
 check_extern_crate!(
-    #[ignore] // ctpop intrinsic not yet shimmed (interpreter limitation)
+    #[ignore] // `copy_nonoverlapping` statement not yet supported
     test_rust_abi_simd_sum,
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
@@ -445,7 +445,7 @@ check_extern_crate!(
 );
 
 check_extern_crate!(
-    #[ignore] // ctpop intrinsic not yet shimmed (interpreter limitation)
+    #[ignore] // `copy_nonoverlapping` statement not yet supported
     test_rust_abi_simd_add,
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
