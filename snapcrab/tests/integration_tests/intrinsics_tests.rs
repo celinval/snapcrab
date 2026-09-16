@@ -128,6 +128,24 @@ check_custom_start!(
     start_fn = "align_of_val",
 );
 
+check_custom_start!(
+    test_size_of_val_unsized_tail,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "size_of_val_unsized_tail",
+    result = TestResult::ErrorRegex(
+        r".*`intrinsics::size_of_val` does not yet support the unsized type.*".to_string()
+    ),
+);
+
+check_custom_start!(
+    test_align_of_val_unsized_tail,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "align_of_val_unsized_tail",
+    result = TestResult::ErrorRegex(
+        r".*`intrinsics::align_of_val` does not yet support the unsized type.*".to_string()
+    ),
+);
+
 // --- Unchecked integer arithmetic ---
 
 check_custom_start!(

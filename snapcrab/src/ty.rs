@@ -11,6 +11,10 @@ pub trait MonoType {
     /// Return the alignment of the type in bytes.
     fn alignment(&self) -> Result<usize>;
 
+    /// Check whether this is an unsized type, whose size and alignment may
+    /// depend on a pointer's metadata rather than on the type alone.
+    fn is_unsized(&self) -> Result<bool>;
+
     /// Check if this is a thin pointer (single usize).
     fn is_thin_ptr(&self) -> bool;
 
@@ -30,6 +34,10 @@ impl MonoType for Ty {
         Ok(self
             .layout()
             .map(|layout| layout.shape().abi_align as usize)?)
+    }
+
+    fn is_unsized(&self) -> Result<bool> {
+        Ok(self.layout().map(|layout| layout.shape().is_unsized())?)
     }
 
     fn is_thin_ptr(&self) -> bool {

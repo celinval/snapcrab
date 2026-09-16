@@ -164,7 +164,8 @@ fn is_uninhabited(ty: Ty) -> Result<bool> {
 /// Sized types ignore the pointer; unsized slices and `str` read their length
 /// from the pointer's metadata.
 ///
-/// TODO: Other unsized types (e.g. `dyn Trait`) are not yet supported.
+/// TODO: Other unsized types are rejected for now: `dyn Trait`, and ADTs with
+/// an unsized tail such as `struct S { a: u64, b: [u8] }`.
 fn size_of_val(ty: Ty, ptr: &Value) -> Result<usize> {
     match ty.kind() {
         TyKind::RigidTy(RigidTy::Slice(elem)) => {
@@ -179,6 +180,11 @@ fn size_of_val(ty: Ty, ptr: &Value) -> Result<usize> {
         TyKind::RigidTy(RigidTy::Dynamic(..)) => {
             bail!("`intrinsics::size_of_val` does not yet support `dyn Trait` types")
         }
+        // An unsized type reaching here has a tail we cannot resolve, so its
+        // sized-prefix layout would be a silently wrong answer.
+        _ if ty.is_unsized()? => {
+            bail!("`intrinsics::size_of_val` does not yet support the unsized type `{ty}`")
+        }
         _ => ty.size(),
     }
 }
@@ -187,13 +193,20 @@ fn size_of_val(ty: Ty, ptr: &Value) -> Result<usize> {
 ///
 /// Sized types ignore the pointer; unsized slices and `str` return the alignment of their elements.
 ///
-/// TODO: Other unsized types (e.g. `dyn Trait`) are not yet supported.
+/// TODO: Other unsized types are rejected for now: `dyn Trait`, and ADTs with
+/// an unsized tail such as `struct S { a: u64, b: [u8] }`.
 fn align_of_val(ty: Ty, _ptr: &Value) -> Result<usize> {
     match ty.kind() {
         TyKind::RigidTy(RigidTy::Slice(elem)) => elem.alignment(),
         TyKind::RigidTy(RigidTy::Str) => Ok(mem::align_of::<u8>()),
         TyKind::RigidTy(RigidTy::Dynamic(..)) => {
             bail!("`intrinsics::align_of_val` does not yet support `dyn Trait` types")
+        }
+        // A slice or `str` tail would make the static alignment correct, but a
+        // `dyn Trait` tail takes it from the vtable. Reject both rather than be
+        // right by accident in one case.
+        _ if ty.is_unsized()? => {
+            bail!("`intrinsics::align_of_val` does not yet support the unsized type `{ty}`")
         }
         _ => ty.alignment(),
     }

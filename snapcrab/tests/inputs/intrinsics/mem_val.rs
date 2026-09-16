@@ -29,3 +29,25 @@ pub fn align_of_val() {
     let slice: &[u32] = &[1, 2, 3];
     assert!(std::mem::align_of_val(slice) == 4);
 }
+
+/// A struct whose tail is unsized, so its size depends on the pointer metadata.
+struct Tail<T: ?Sized> {
+    header: u64,
+    tail: T,
+}
+
+/// An unsized tail is rejected rather than answered from the sized prefix,
+/// which would report 8 instead of 16 here.
+pub fn size_of_val_unsized_tail() -> usize {
+    let sized: Tail<[u8; 3]> = Tail { header: 0, tail: [1, 2, 3] };
+    let unsized_ref: &Tail<[u8]> = &sized;
+    std::mem::size_of_val(unsized_ref)
+}
+
+/// The static alignment would happen to be right here, but it is rejected for
+/// the same reason: a `dyn Trait` tail would take its alignment from the vtable.
+pub fn align_of_val_unsized_tail() -> usize {
+    let sized: Tail<[u8; 3]> = Tail { header: 0, tail: [1, 2, 3] };
+    let unsized_ref: &Tail<[u8]> = &sized;
+    std::mem::align_of_val(unsized_ref)
+}
