@@ -128,22 +128,50 @@ check_custom_start!(
     start_fn = "align_of_val",
 );
 
+// Unsized-tail ADTs: size/align combine the sized prefix with the tail's
+// runtime layout. Cases vary how the header and tail alignments compare.
+
 check_custom_start!(
-    test_size_of_val_unsized_tail,
+    test_unsized_tail_header_align_dominates,
     input = "intrinsics/mem_val.rs",
-    start_fn = "size_of_val_unsized_tail",
-    result = TestResult::ErrorRegex(
-        r".*`intrinsics::size_of_val` does not yet support the unsized type.*".to_string()
-    ),
+    start_fn = "header_align_dominates",
 );
 
 check_custom_start!(
-    test_align_of_val_unsized_tail,
+    test_unsized_tail_align_dominates,
     input = "intrinsics/mem_val.rs",
-    start_fn = "align_of_val_unsized_tail",
-    result = TestResult::ErrorRegex(
-        r".*`intrinsics::align_of_val` does not yet support the unsized type.*".to_string()
-    ),
+    start_fn = "tail_align_dominates",
+);
+
+check_custom_start!(
+    test_unsized_tail_equal_align,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "equal_align",
+);
+
+check_custom_start!(
+    test_unsized_tail_size_rounds_up,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "size_rounds_up_to_align",
+);
+
+check_custom_start!(
+    test_unsized_tail_empty,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "empty_tail",
+);
+
+check_custom_start!(
+    test_unsized_tail_nested,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "nested_unsized_tail",
+);
+
+check_custom_start!(
+    test_slice_size_exceeds_isize_max,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "slice_size_exceeds_isize_max",
+    result = TestResult::ErrorRegex(r".*exceeds the maximum object size.*".to_string()),
 );
 
 // --- Unchecked integer arithmetic ---

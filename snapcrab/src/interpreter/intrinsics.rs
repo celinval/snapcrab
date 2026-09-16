@@ -9,6 +9,7 @@ use crate::interpreter::check::{CheckConfig, validate_value};
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
+use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::{AdtKind, GenericArgs, RigidTy, Ty, TyKind, VariantDef};
 use tracing::debug;
@@ -53,11 +54,11 @@ pub fn eval_intrinsic(
         // pointer's metadata (slice length, `str` byte length).
         "size_of_val" => {
             let ty = intrinsic_type_arg(instance, 0)?;
-            Ok(Value::from_type(size_of_val(ty, &args[0])?))
+            Ok(Value::from_type(size_and_align_of_val(ty, &args[0])?.0))
         }
         "align_of_val" | "min_align_of_val" => {
             let ty = intrinsic_type_arg(instance, 0)?;
-            Ok(Value::from_type(align_of_val(ty, &args[0])?))
+            Ok(Value::from_type(size_and_align_of_val(ty, &args[0])?.1))
         }
         // count ones -- read_uint extend integer with "0" bits, then count ones
         "ctpop" => Ok(Value::from_type(args[0].read_uint().count_ones())),
@@ -159,56 +160,96 @@ fn is_uninhabited(ty: Ty) -> Result<bool> {
     }
 }
 
-/// Compute `size_of_val` for `ty` given a (possibly wide) pointer to it.
+/// The maximum size of a Rust value in bytes: allocations and objects must not
+/// exceed `isize::MAX`.
+const MAX_OBJECT_SIZE: usize = isize::MAX as usize;
+
+/// Compute the runtime `(size, align)` in bytes of the value `ty` points to.
 ///
-/// Sized types ignore the pointer; unsized slices and `str` read their length
-/// from the pointer's metadata.
+/// Sized types ignore the pointer. Unsized types read from the pointer's
+/// metadata: slices/`str` from the element count, and an ADT/tuple with an
+/// unsized tail from that tail, recursively.
 ///
-/// TODO: Other unsized types are rejected for now: `dyn Trait`, and ADTs with
-/// an unsized tail such as `struct S { a: u64, b: [u8] }`.
-fn size_of_val(ty: Ty, ptr: &Value) -> Result<usize> {
+/// TODO: `dyn Trait` (and any tail ending in one) takes its size and alignment
+/// from the vtable, which is not modeled yet.
+fn size_and_align_of_val(ty: Ty, ptr: &Value) -> Result<(usize, usize)> {
     match ty.kind() {
         TyKind::RigidTy(RigidTy::Slice(elem)) => {
             let len = ptr.ptr_metadata()?.read_uint() as usize;
-            // The length comes from the interpreted program, so an absurd
-            // slice metadata must not wrap into a plausible size.
-            len.checked_mul(elem.size()?).with_context(|| {
-                format!("slice of {len} `{elem}` elements overflows the address space")
-            })
+            // The length comes from the interpreted program, possibly from
+            // unsafe code, so validate the safety requirement: the total size
+            // `len * size_of::<T>()` must not exceed `isize::MAX`. A `usize`
+            // `checked_mul` alone would miss products in
+            // `(isize::MAX, usize::MAX]`.
+            let size = len
+                .checked_mul(elem.size()?)
+                .filter(|&size| size <= MAX_OBJECT_SIZE)
+                .with_context(|| {
+                    format!("slice of {len} `{elem}` elements exceeds the maximum object size")
+                })?;
+            Ok((size, elem.alignment()?))
         }
-        TyKind::RigidTy(RigidTy::Str) => Ok(ptr.ptr_metadata()?.read_uint() as usize),
+        TyKind::RigidTy(RigidTy::Str) => Ok((
+            ptr.ptr_metadata()?.read_uint() as usize,
+            mem::align_of::<u8>(),
+        )),
         TyKind::RigidTy(RigidTy::Dynamic(..)) => {
-            bail!("`intrinsics::size_of_val` does not yet support `dyn Trait` types")
+            bail!("`size_of_val`/`align_of_val` do not yet support `dyn Trait` types")
         }
-        // An unsized type reaching here has a tail we cannot resolve, so its
-        // sized-prefix layout would be a silently wrong answer.
-        _ if ty.is_unsized()? => {
-            bail!("`intrinsics::size_of_val` does not yet support the unsized type `{ty}`")
-        }
-        _ => ty.size(),
+        // An ADT or tuple whose last field is unsized.
+        _ if ty.is_unsized()? => unsized_tail_size_and_align(ty, ptr),
+        _ => Ok((ty.size()?, ty.alignment()?)),
     }
 }
 
-/// Compute `align_of_val` for `ty` given a (possibly wide) pointer to it.
-///
-/// Sized types ignore the pointer; unsized slices and `str` return the alignment of their elements.
-///
-/// TODO: Other unsized types are rejected for now: `dyn Trait`, and ADTs with
-/// an unsized tail such as `struct S { a: u64, b: [u8] }`.
-fn align_of_val(ty: Ty, _ptr: &Value) -> Result<usize> {
+/// Compute `(size, align)` for an aggregate (`struct`/tuple) with an unsized
+/// tail, following rustc's rule: the tail sits at its field offset, the whole
+/// alignment is the larger of the sized prefix's and the tail's, and the size
+/// is the tail's end rounded up to that alignment.
+fn unsized_tail_size_and_align(ty: Ty, ptr: &Value) -> Result<(usize, usize)> {
+    let shape = ty.layout()?.shape();
+    let FieldsShape::Arbitrary { offsets } = &shape.fields else {
+        bail!("unsized type `{ty}` has no field layout");
+    };
+    let tail_offset = offsets
+        .last()
+        .with_context(|| format!("unsized type `{ty}` has no fields"))?
+        .bytes();
+
+    let (tail_size, tail_align) = size_and_align_of_val(unsized_tail_ty(ty)?, ptr)?;
+    let align = (shape.abi_align as usize).max(tail_align);
+
+    // Round the tail's end up to the aggregate's alignment, then enforce the
+    // `isize::MAX` object-size limit.
+    let end = tail_offset
+        .checked_add(tail_size)
+        .and_then(|end| end.checked_add(align - 1))
+        .map(|end| end & !(align - 1))
+        .filter(|&size| size <= MAX_OBJECT_SIZE)
+        .with_context(|| format!("size of `{ty}` exceeds the maximum object size"))?;
+    Ok((end, align))
+}
+
+/// The type of an aggregate's last (unsized) field.
+fn unsized_tail_ty(ty: Ty) -> Result<Ty> {
     match ty.kind() {
-        TyKind::RigidTy(RigidTy::Slice(elem)) => elem.alignment(),
-        TyKind::RigidTy(RigidTy::Str) => Ok(mem::align_of::<u8>()),
-        TyKind::RigidTy(RigidTy::Dynamic(..)) => {
-            bail!("`intrinsics::align_of_val` does not yet support `dyn Trait` types")
+        TyKind::RigidTy(RigidTy::Tuple(fields)) => fields
+            .last()
+            .copied()
+            .with_context(|| format!("tuple `{ty}` has no fields")),
+        TyKind::RigidTy(RigidTy::Adt(def, args)) => {
+            let variant = def
+                .variants_iter()
+                .next()
+                .with_context(|| format!("`{ty}` has no variant"))?;
+            let field = variant
+                .fields()
+                .last()
+                .cloned()
+                .with_context(|| format!("`{ty}` has no fields"))?;
+            Ok(field.ty_with_args(&args))
         }
-        // A slice or `str` tail would make the static alignment correct, but a
-        // `dyn Trait` tail takes it from the vtable. Reject both rather than be
-        // right by accident in one case.
-        _ if ty.is_unsized()? => {
-            bail!("`intrinsics::align_of_val` does not yet support the unsized type `{ty}`")
-        }
-        _ => ty.alignment(),
+        _ => bail!("cannot determine the unsized tail of `{ty}`"),
     }
 }
 
