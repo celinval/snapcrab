@@ -8,6 +8,7 @@ mod integration_tests {
     mod drop_tests;
     mod dyn_tests;
     mod enum_tests;
+    mod fn_pointer_tests;
     mod heap_tests;
     mod intrinsics_tests;
     mod native_tests;
@@ -777,7 +778,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_static_str_slice_len,
     input = "static_data.rs",
     start_fn = "test_static_str_slice_len",

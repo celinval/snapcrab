@@ -451,6 +451,19 @@ impl FnInterpreter<'_> {
 
         let func_instance = match func_ty.kind() {
             TyKind::RigidTy(RigidTy::FnDef(def_id, args)) => Instance::resolve(def_id, &args)?,
+            // Indirect call through a `fn` pointer value: resolve the reified
+            // address back to its function.
+            TyKind::RigidTy(RigidTy::FnPtr(_)) => {
+                let addr = self.evaluate_operand(func)?.read_uint() as usize;
+                let instance = self.memory.resolve_fn(addr)?;
+                // A non-capturing closure reified to a `fn` pointer carries no
+                // environment, but its body still takes the (ZST) closure as
+                // its first argument, so supply it.
+                if matches!(instance.ty().kind(), TyKind::RigidTy(RigidTy::Closure(..))) {
+                    arg_values.insert(0, Value::unit().clone());
+                }
+                instance
+            }
             _ => bail!("Unsupported function type: {:?}", func_ty),
         };
 

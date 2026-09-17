@@ -1,13 +1,16 @@
 use crate::memory::ThreadMemory;
 use crate::ty::MonoType;
 use crate::value::{Value, uint_from_bytes};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
 use rustc_public::abi::{FieldsShape, Scalar, TagEncoding, VariantsShape};
 use rustc_public::mir::alloc::GlobalAlloc;
+use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
 use rustc_public::target::MachineInfo;
-use rustc_public::ty::{AdtDef, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx};
+use rustc_public::ty::{
+    AdtDef, ClosureKind, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx,
+};
 use rustc_public_bridge::IndexedVal;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -72,6 +75,8 @@ impl BinaryEval for BinOp {
                     eval_wide_ptr_binop(*self, left, right, &operand_type)
                 }
             }
+            // Function pointers are thin; compare/operate by address.
+            RigidTy::FnPtr(_) => eval_int_binop::<usize>(*self, left, right),
             _ => bail!(
                 "Unsupported binary operation `{self:?}` on `{}` type",
                 Ty::from_rigid_kind(operand_type)
@@ -471,6 +476,26 @@ impl<'a> FnInterpreter<'a> {
             }
             CastKind::PointerCoercion(PointerCoercion::Unsize) => {
                 perform_unsized_coercion(value, source_ty, target_ty, self.memory)
+            }
+            // Reify a function item or a non-capturing closure to a `fn`
+            // pointer: its value is the function's synthetic address.
+            CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_)) => {
+                let TyKind::RigidTy(RigidTy::FnDef(def, args)) = source_ty.kind() else {
+                    bail!("ReifyFnPointer cast on non-function `{source_ty}`");
+                };
+                Ok(Value::from_type(
+                    self.memory.reify_fn(Instance::resolve(def, &args)?),
+                ))
+            }
+            CastKind::PointerCoercion(PointerCoercion::ClosureFnPointer(_)) => {
+                let TyKind::RigidTy(RigidTy::Closure(def, args)) = source_ty.kind() else {
+                    bail!("ClosureFnPointer cast on non-closure `{source_ty}`");
+                };
+                // A closure coercible to `fn` captures nothing, so its `Fn`
+                // body is what the pointer invokes.
+                let body = Instance::resolve_closure(def, &args, ClosureKind::Fn)
+                    .map_err(|e| anyhow!("failed to resolve closure `{source_ty}`: {e:?}"))?;
+                Ok(Value::from_type(self.memory.reify_fn(body)))
             }
             CastKind::Transmute => {
                 check::validate_value(&value, target_ty, &self.memory.check_config)?;

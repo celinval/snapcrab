@@ -58,16 +58,12 @@ check_custom_start!(
 // --- Closures as function pointers and trait objects ---
 
 check_custom_start!(
-    // TODO: Requires the `ClosureFnPointer` cast coercion.
-    #[ignore]
     test_closure_as_fn_pointer,
     input = "closures.rs",
     start_fn = "as_fn_pointer",
 );
 
 check_custom_start!(
-    // TODO: Requires closure -> `dyn Fn` unsizing coercion.
-    #[ignore]
     test_closure_as_dyn_fn,
     input = "closures.rs",
     start_fn = "as_dyn_fn",

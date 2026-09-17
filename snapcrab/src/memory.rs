@@ -91,6 +91,11 @@ impl ThreadMemory {
         self.statics.resolve_fn(address)
     }
 
+    /// Reify a function to its stable synthetic address.
+    pub fn reify_fn(&self, instance: Instance) -> usize {
+        self.statics.reify_fn(instance)
+    }
+
     /// Service a `__rust_alloc`/`__rust_alloc_zeroed` request, returning the
     /// base address of a fresh, correctly-aligned heap block.
     pub fn heap_allocate(&self, size: usize, align: usize) -> Result<usize> {
