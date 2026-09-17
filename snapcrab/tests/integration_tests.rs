@@ -6,6 +6,7 @@ mod common;
 mod integration_tests {
     mod closure_tests;
     mod drop_tests;
+    mod dyn_tests;
     mod enum_tests;
     mod heap_tests;
     mod intrinsics_tests;

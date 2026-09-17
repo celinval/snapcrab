@@ -108,6 +108,25 @@ pub fn invoke_fn(
     .with_context(|| format!("Native call to `{}` panicked", instance.name()))?
 }
 
+/// Resolve a trait-object (`Virtual`) call to the concrete method instance.
+///
+/// The receiver (`args[0]`) is a wide `&dyn` pointer whose metadata is the
+/// vtable address. Slot `idx` holds the method's reified function pointer,
+/// which resolves back to its `Instance`. The receiver is then narrowed to the
+/// thin data pointer the concrete method expects as `&self`.
+fn resolve_virtual(idx: usize, args: &mut [Value], memory: &ThreadMemory) -> Result<Instance> {
+    let vtable = args
+        .first()
+        .context("virtual call has no receiver")?
+        .ptr_metadata()?
+        .read_uint() as usize;
+    let slot = vtable + idx * pointer_width();
+    let fn_addr = memory.read_addr(slot, Ty::usize_ty())?.read_uint() as usize;
+    let method = memory.resolve_fn(fn_addr)?;
+    args[0] = args[0].clone().to_data_addr()?;
+    Ok(method)
+}
+
 /// Extract a human-readable message from a caught panic payload.
 pub(crate) fn panic_message(panic: &dyn Any) -> String {
     if let Some(s) = panic.downcast_ref::<&str>() {
@@ -450,21 +469,18 @@ impl FnInterpreter<'_> {
             arg_values.extend(untuple(&tuple, tuple_ty)?);
         }
 
-        // Resolve shim callees to something interpretable. Drop glue (e.g. a
-        // direct `drop_in_place` call from `ManuallyDrop::drop`) carries its
-        // own monomorphized MIR, so interpret it directly. Closure call shims
-        // (`Fn/FnMut/FnOnce::call*`) have no body of their own and must be
-        // redirected to the closure body first.
+        // Resolve the callee to something interpretable:
+        // - `Virtual`: a trait-object call; read the method from the receiver's
+        //   vtable and narrow the wide `&dyn` receiver to the concrete `&self`.
+        // - Drop glue and other body-carrying shims interpret directly.
+        // - Closure call shims (`Fn/FnMut/FnOnce::call*`) have no body of their
+        //   own and must be redirected to the closure body first.
         //
         // TODO: Handle remaining shim kinds (clone, fn-ptr) here too.
-        let callee = if func_instance.kind == InstanceKind::Shim {
-            if func_instance.has_body() {
-                func_instance
-            } else {
-                resolve_closure_shim(func_instance)?
-            }
-        } else {
-            func_instance
+        let callee = match func_instance.kind {
+            InstanceKind::Virtual { idx } => resolve_virtual(idx, &mut arg_values, self.memory)?,
+            InstanceKind::Shim if !func_instance.has_body() => resolve_closure_shim(func_instance)?,
+            _ => func_instance,
         };
 
         let result = invoke_fn(callee, self.memory, arg_values, self.unwinding)?;
@@ -487,6 +503,13 @@ impl FnInterpreter<'_> {
             .ty(self.body.locals())
             .with_context(|| format!("failed to resolve type of drop place `{place:?}`"))?;
 
+        // Dropping a trait object dispatches through its vtable to the concrete
+        // `drop_in_place`. Going through `drop_in_place::<dyn Trait>` instead
+        // would re-resolve to the same `dyn` drop glue and recurse forever.
+        if place_ty.kind().is_trait() {
+            return self.drop_dyn(place, place_ty);
+        }
+
         let drop_instance = Instance::resolve_drop_in_place(place_ty);
 
         // Types that need no cleanup resolve to an empty shim; skipping it
@@ -501,6 +524,27 @@ impl FnInterpreter<'_> {
         let ptr = self.place_to_ptr(place, ptr_ty)?;
 
         invoke_fn(drop_instance, self.memory, vec![ptr], self.unwinding)?;
+        Ok(())
+    }
+
+    /// Drop a trait-object value by dispatching through its vtable.
+    ///
+    /// The vtable's first slot (`MetadataDropInPlace`) holds the concrete
+    /// type's `drop_in_place`; invoke it with the thin data pointer.
+    fn drop_dyn(&mut self, place: &Place, place_ty: Ty) -> Result<()> {
+        let ptr_ty = Ty::new_ptr(place_ty, Mutability::Mut);
+        let fat = self.place_to_ptr(place, ptr_ty)?;
+        let vtable = fat.ptr_metadata()?.read_uint() as usize;
+
+        // A null drop slot means the concrete type needs no cleanup.
+        let fn_addr = self.memory.read_addr(vtable, Ty::usize_ty())?.read_uint() as usize;
+        if fn_addr == 0 {
+            return Ok(());
+        }
+        let drop_instance = self.memory.resolve_fn(fn_addr)?;
+
+        let data = fat.to_data_addr()?;
+        invoke_fn(drop_instance, self.memory, vec![data], self.unwinding)?;
         Ok(())
     }
 

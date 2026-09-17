@@ -86,6 +86,11 @@ impl ThreadMemory {
         self.statics.resolve_alloc(alloc_id)
     }
 
+    /// Resolve a reified function-pointer address back to its `Instance`.
+    pub fn resolve_fn(&self, address: usize) -> Result<Instance> {
+        self.statics.resolve_fn(address)
+    }
+
     /// Service a `__rust_alloc`/`__rust_alloc_zeroed` request, returning the
     /// base address of a fresh, correctly-aligned heap block.
     pub fn heap_allocate(&self, size: usize, align: usize) -> Result<usize> {

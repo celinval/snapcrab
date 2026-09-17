@@ -20,11 +20,16 @@ use rustc_public::{CrateDef, local_crate};
 use rustc_public_bridge::IndexedVal;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::{ptr, slice};
 
 /// Manages static/global allocations materialized from the compiler.
 #[derive(Default)]
 pub struct Statics {
     inner: RefCell<StaticsInner>,
+    /// Registry of reified functions. Kept in its own cell (and with its own
+    /// sanitizer) because a function address is *callable*, not *readable*:
+    /// it must not satisfy a data read the way materialized data does.
+    code: RefCell<CodeSegment>,
 }
 
 #[derive(Default)]
@@ -72,22 +77,35 @@ impl Statics {
             }
             // A vtable resolves to a real memory allocation holding the drop
             // pointer, the type's size and align, and the method pointers, so
-            // materialize that instead. This backs `dyn Trait` metadata.
+            // materialize that instead. Its method/drop slots carry provenance
+            // to `GlobalAlloc::Function`, so they reify to callable addresses
+            // (see the `Function` arm), which backs both size/align reads and
+            // virtual dispatch.
             //
-            // FIXME: The method and drop entries are function pointers, which
-            // materialize as null (see the `Function` arm below). This is
-            // enough for `size_of_val`/`align_of_val`, which only read the
-            // size and align words, but virtual dispatch and dropping through
-            // a trait object need these entries to resolve to callable
-            // functions.
+            // FIXME: a reified address is synthetic, not a real machine
+            // address, so a vtable entry (or `fn` pointer) handed to native
+            // code and called there won't work until we JIT re-entry stubs.
             GlobalAlloc::VTable(..) => {
                 let vtable = global
                     .vtable_allocation()
                     .ok_or_else(|| anyhow::anyhow!("failed to resolve vtable allocation"))?;
                 self.resolve_alloc(vtable)
             }
-            GlobalAlloc::Function(_) | GlobalAlloc::TypeId { .. } => Ok(0),
+            // A function pointer reifies to a synthetic callable address; this
+            // backs const/static `fn` pointers and vtable method/drop slots.
+            GlobalAlloc::Function(instance) => Ok(self.reify_fn(instance)),
+            GlobalAlloc::TypeId { .. } => Ok(0),
         }
+    }
+
+    /// Reify a function to its stable synthetic address.
+    pub fn reify_fn(&self, instance: Instance) -> usize {
+        self.code.borrow_mut().reify(instance)
+    }
+
+    /// Resolve a reified function address back to its `Instance`.
+    pub fn resolve_fn(&self, addr: usize) -> anyhow::Result<Instance> {
+        self.code.borrow().resolve(addr)
     }
 
     /// Materialize an allocation into real memory, resolving nested provenance.
@@ -127,7 +145,7 @@ impl Statics {
         inner.allocations.push(buf);
         // SAFETY: the buffer's heap pointer remains stable after push (only the
         // `AlignedBuf` struct moves, not the allocation it owns).
-        let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, len) };
+        let slice = unsafe { slice::from_raw_parts(addr as *const u8, len) };
         inner.sanitizer.register_alloc(slice);
         inner.alloc_map.insert(id_idx, alloc_idx);
 
@@ -168,11 +186,62 @@ unsafe impl MemorySegment for Statics {
         let ptr = address as *const u8;
         // SAFETY: sanitizer confirmed the range is within a live allocation;
         // the bytes are copied into an owned `Value` before returning.
-        let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
+        let slice = unsafe { slice::from_raw_parts(ptr, size) };
         Ok(Value::from_bytes(slice))
     }
 
     fn write_addr(&self, _address: usize, _data: &[u8]) -> Result<(), MemoryAccessError> {
         Err(MemoryAccessError::OutOfBounds)
+    }
+}
+
+/// A registered function whose stable heap address is its `fn`-pointer value.
+///
+/// Rust guarantees no particular alignment for the code a `fn` pointer points
+/// at, so we impose none; the address is wherever its `Box` lands.
+/// [`CodeSegment::resolve`] still accepts only an exact base, because it checks
+/// the full `FunctionInfo` size.
+struct FunctionInfo {
+    instance: Instance,
+}
+
+/// Maps interpreted functions to synthetic, unique, callable addresses.
+///
+/// Reifying an `Instance` returns the stable address of its boxed
+/// `FunctionInfo` (deduplicated, so the same function always reifies to the
+/// same address); resolving an address recovers the `Instance`. The addresses
+/// are real heap allocations, so they never collide with data allocations, and
+/// the sanitizer validates that an address is a genuine function.
+#[derive(Default)]
+struct CodeSegment {
+    sanitizer: MemorySanitizer,
+    functions: HashMap<Instance, Box<FunctionInfo>>,
+}
+
+impl CodeSegment {
+    /// Return the stable address for `instance`, allocating it on first use.
+    fn reify(&mut self, instance: Instance) -> usize {
+        if let Some(info) = self.functions.get(&instance) {
+            return ptr::from_ref(info.as_ref()) as usize;
+        }
+        let info = Box::new(FunctionInfo { instance });
+        let addr = ptr::from_ref(info.as_ref()) as usize;
+        // SAFETY: `info` lives in the map for the program's lifetime, so the
+        // registered range stays valid; functions are never freed.
+        let slice = unsafe { slice::from_raw_parts(addr as *const u8, size_of::<FunctionInfo>()) };
+        self.sanitizer.register_alloc(slice);
+        self.functions.insert(instance, info);
+        addr
+    }
+
+    /// Recover the `Instance` a reified address points to.
+    fn resolve(&self, addr: usize) -> anyhow::Result<Instance> {
+        // Checking the exact `FunctionInfo` size accepts only a true base: an
+        // interior or misaligned address exceeds the one-function allocation.
+        self.sanitizer
+            .check_access(addr, size_of::<FunctionInfo>())
+            .map_err(|_| anyhow::anyhow!("invalid function pointer at 0x{addr:x}"))?;
+        // SAFETY: the address is a live `FunctionInfo` base (checked above).
+        Ok(unsafe { &*(addr as *const FunctionInfo) }.instance)
     }
 }

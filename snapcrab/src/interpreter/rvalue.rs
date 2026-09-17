@@ -497,16 +497,19 @@ fn perform_unsized_coercion(
     dst_ptr_ty: Ty,
     memory: &ThreadMemory,
 ) -> Result<Value> {
+    // Only built-in pointers/references unsize here. Smart pointers such as
+    // `Rc`/`Arc`/`Pin` coerce through their own `CoerceUnsized` impl (the data
+    // pointer lives in a field), which is not yet supported.
     let src_pointee = src_ptr_ty
         .kind()
         .builtin_deref(true)
         .map(|TypeAndMut { ty, .. }| ty)
-        .with_context(|| format!("Expected pointer coercion, found source `{src_ptr_ty}`"))?;
+        .with_context(|| format!("unsized coercion of `{src_ptr_ty}` is not yet supported"))?;
     let dst_pointee = dst_ptr_ty
         .kind()
         .builtin_deref(true)
         .map(|TypeAndMut { ty, .. }| ty)
-        .with_context(|| format!("Expected pointer coercion, found target `{dst_ptr_ty}`"))?;
+        .with_context(|| format!("unsized coercion to `{dst_ptr_ty}` is not yet supported"))?;
     // `kind()` translates from rustc's internal representation, so resolve each
     // pointee's kind once and reuse it.
     let src_kind = src_pointee.kind();
