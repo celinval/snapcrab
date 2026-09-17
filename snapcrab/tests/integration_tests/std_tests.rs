@@ -13,14 +13,12 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_option_map,
     input = "std_ops/option.rs",
     start_fn = "test_option_map",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_option_and_then,
     input = "std_ops/option.rs",
     start_fn = "test_option_and_then",
@@ -59,7 +57,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_result_unwrap_or,
     input = "std_ops/result.rs",
     start_fn = "test_result_unwrap_or",
@@ -122,7 +119,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_checked_add_some,
     input = "std_ops/numeric.rs",
     start_fn = "test_checked_add_some",
@@ -142,14 +138,12 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_leading_zeros,
     input = "std_ops/numeric.rs",
     start_fn = "test_leading_zeros",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_count_ones,
     input = "std_ops/numeric.rs",
     start_fn = "test_count_ones",
@@ -172,14 +166,12 @@ check_custom_start!(
 // --- Comparison operations ---
 
 check_custom_start!(
-    #[ignore]
     test_std_min,
     input = "std_ops/cmp.rs",
     start_fn = "test_min",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_max,
     input = "std_ops/cmp.rs",
     start_fn = "test_max",
@@ -192,7 +184,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_ord_methods,
     input = "std_ops/cmp.rs",
     start_fn = "test_ord_methods",

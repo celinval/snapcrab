@@ -203,7 +203,6 @@ check_native_call!(
 );
 
 check_native_call!(
-    #[ignore] // PassMode::Cast for struct arg not yet supported
     test_native_sum_triple,
     native_lib = "native/lib_structs.rs",
     input = "native/call_structs.rs",
