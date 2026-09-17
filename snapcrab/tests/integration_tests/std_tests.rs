@@ -125,7 +125,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_checked_add_overflow,
     input = "std_ops/numeric.rs",
     start_fn = "test_checked_add_overflow",

@@ -589,7 +589,9 @@ impl FnInterpreter<'_> {
     fn evaluate_constant(&self, const_: &MirConst) -> Result<Value> {
         match const_.kind() {
             ConstantKind::Allocated(alloc) => {
-                let mut bytes = alloc.raw_bytes()?;
+                // Copy the initialized bytes and leave uninitialized ones
+                // zeroed.
+                let mut bytes: Vec<u8> = alloc.bytes.iter().map(|b| b.unwrap_or(0)).collect();
                 // Resolve provenance entries (pointers to other allocations).
                 let ptr_size = pointer_width();
                 for (offset, prov) in &alloc.provenance.ptrs {
