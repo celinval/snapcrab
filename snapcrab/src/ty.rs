@@ -1,5 +1,6 @@
 //! Module with type extensions.
 use anyhow::Result;
+use rustc_public::CrateDefType;
 use rustc_public::abi::{Primitive, Scalar, ValueAbi};
 use rustc_public::mir::Mutability;
 use rustc_public::ty::{RigidTy, Ty, TyKind};

@@ -17,11 +17,11 @@ use crate::interpreter::function::{invoke_fn, panic_message, resolve_closure_shi
 use crate::memory::ThreadMemory;
 use crate::{CheckConfig, load_native_libs};
 use anyhow::{Result, bail};
-use rustc_public::CrateDef;
 use rustc_public::abi::FieldsShape;
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::{RigidTy, Ty, TyKind};
+use rustc_public::{CrateDef, CrateDefType};
 use rustc_public::{CrateItem, entry_fn};
 use std::panic::{self};
 use std::path::Path;

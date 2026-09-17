@@ -5,6 +5,7 @@
 
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Result, bail};
+use rustc_public::CrateDefType;
 use rustc_public::abi::{
     FieldsShape, Primitive, Scalar, TagEncoding, ValueAbi, VariantFields, VariantsShape,
 };

@@ -10,6 +10,7 @@ use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
+use rustc_public::CrateDefType;
 use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::{AdtKind, GenericArgs, RigidTy, Ty, TyKind, VariantDef};

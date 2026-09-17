@@ -3,6 +3,7 @@ use crate::ty::MonoType;
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, anyhow, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
+use rustc_public::CrateDefType;
 use rustc_public::abi::{FieldsShape, Scalar, TagEncoding, VariantsShape};
 use rustc_public::mir::alloc::GlobalAlloc;
 use rustc_public::mir::mono::Instance;
