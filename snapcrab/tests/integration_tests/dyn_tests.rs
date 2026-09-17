@@ -85,3 +85,9 @@ check_custom_start!(
     input = "dyn_dispatch.rs",
     start_fn = "drop_adt_dyn_tail",
 );
+
+check_custom_start!(
+    test_dyn_upcast_secondary_dispatch,
+    input = "dyn_dispatch.rs",
+    start_fn = "upcast_secondary_dispatch",
+);

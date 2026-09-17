@@ -138,8 +138,8 @@ pub fn upcast_dyn_size_align() {
 }
 
 /// Upcast to a non-principal supertrait (`trait T: Y + Z`, `&dyn T -> &dyn Z`).
-/// The reused vtable is not `Z`'s, but its header still describes the concrete
-/// type, so size/align remain correct.
+/// The upcast reads `Z`'s vtable from the `TraitVPtr` slot, and its header
+/// describes the concrete type, so size/align are correct.
 pub fn upcast_dyn_secondary_supertrait() {
     trait Y {}
     trait Z {}

@@ -253,3 +253,41 @@ pub fn drop_adt_dyn_tail() {
     }
     assert!(log.get() == 1);
 }
+
+trait Left {
+    fn left(&self) -> u32;
+}
+trait Right {
+    fn right(&self) -> u32;
+}
+trait Both: Left + Right {
+    fn both(&self) -> u32;
+}
+struct Multi;
+impl Left for Multi {
+    fn left(&self) -> u32 {
+        1
+    }
+}
+impl Right for Multi {
+    fn right(&self) -> u32 {
+        2
+    }
+}
+impl Both for Multi {
+    fn both(&self) -> u32 {
+        3
+    }
+}
+
+/// Upcast to a non-principal supertrait (reached via a `TraitVPtr` in the
+/// vtable) and dispatch a method through it.
+pub fn upcast_secondary_dispatch() {
+    let m = Multi;
+    let both: &dyn Both = &m;
+    let right: &dyn Right = both;
+    assert!(right.right() == 2);
+    // The principal supertrait reuses the same vtable.
+    let left: &dyn Left = both;
+    assert!(left.left() == 1);
+}

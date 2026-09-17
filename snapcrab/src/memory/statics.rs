@@ -75,12 +75,8 @@ impl Statics {
                 }
                 Ok(self.materialize_alloc(alloc_id, &alloc))
             }
-            // A vtable resolves to a real memory allocation holding the drop
-            // pointer, the type's size and align, and the method pointers, so
-            // materialize that instead. Its method/drop slots carry provenance
-            // to `GlobalAlloc::Function`, so they reify to callable addresses
-            // (see the `Function` arm), which backs both size/align reads and
-            // virtual dispatch.
+            // A vtable resolves to an allocation holding the drop
+            // pointer, the type's size and align, and the method pointers.
             //
             // FIXME: a reified address is synthetic, not a real machine
             // address, so a vtable entry (or `fn` pointer) handed to native

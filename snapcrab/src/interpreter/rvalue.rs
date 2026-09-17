@@ -1,4 +1,4 @@
-use crate::memory::ThreadMemory;
+use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::MonoType;
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, anyhow, bail};
@@ -9,7 +9,7 @@ use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
 use rustc_public::target::MachineInfo;
 use rustc_public::ty::{
-    AdtDef, ClosureKind, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx,
+    AdtDef, ClosureKind, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx, VtblEntry,
 };
 use rustc_public_bridge::IndexedVal;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -545,17 +545,10 @@ fn perform_unsized_coercion(
         return Ok(value);
     }
     let metadata = if src_kind.is_trait() && dst_kind.is_trait() {
-        // Trait upcast `&dyn T -> &dyn Y`. The concrete type is erased, so the
-        // new vtable is derived from the source's at runtime. The vtable header
-        // (drop/size/align) is shared by all of the object's vtables, so
-        // reusing the source vtable is correct for the principal supertrait and
-        // for `size_of_val`/`align_of_val` in every case.
-        //
-        // FIXME: upcasting to a non-principal supertrait (`trait T: Y + Z`,
-        // `&dyn T -> &dyn Z`) must instead read the matching `TraitVPtr` entry
-        // from the source vtable. That only affects virtual dispatch, which is
-        // not yet supported.
-        value.ptr_metadata()?.read_uint() as usize
+        // Trait upcast `&dyn T -> &dyn Y`: derive the target vtable from the
+        // source's at runtime (the concrete type is erased).
+        let src_vtable = value.ptr_metadata()?.read_uint() as usize;
+        upcast_vtable(&src_pointee, &src_kind, &dst_kind, src_vtable, memory)?
     } else {
         unsize_metadata(&src_pointee, &src_kind, &dst_pointee, &dst_kind, memory)?
     };
@@ -566,6 +559,45 @@ fn perform_unsized_coercion(
         .as_type::<usize>()
         .context("Expected pointer value")?;
     Ok(Value::new_wide_ptr(data_ptr, metadata))
+}
+
+/// Compute the target vtable address for a `&dyn A -> &dyn B` upcast.
+///
+/// A supertrait reached through a `TraitVPtr` entry has its own vtable pointer
+/// in that slot. The embedded (principal) supertrait has no such entry — its
+/// methods sit at the front of the source vtable — so the source vtable is
+/// already a valid target vtable and is reused. The layout depends only on the
+/// trait, not the erased concrete type, so `vtable_entries` on the source trait
+/// gives the slot index.
+fn upcast_vtable(
+    src_pointee: &Ty,
+    src_kind: &TyKind,
+    dst_kind: &TyKind,
+    src_vtable: usize,
+    memory: &ThreadMemory,
+) -> Result<usize> {
+    let src_principal = src_kind
+        .trait_principal()
+        .context("dyn source has no principal trait")?
+        .skip_binder();
+    let dst_def = dst_kind
+        .trait_principal()
+        .context("dyn target has no principal trait")?
+        .skip_binder()
+        .def_id;
+
+    let entries = src_principal.with_self_ty(*src_pointee).vtable_entries();
+    let vptr_slot = entries.iter().enumerate().find_map(|(idx, entry)| {
+        matches!(entry, VtblEntry::TraitVPtr(tr) if tr.def_id == dst_def).then_some(idx)
+    });
+    match vptr_slot {
+        Some(idx) => {
+            let slot = src_vtable + idx * pointer_width();
+            Ok(memory.read_addr(slot, Ty::usize_ty())?.read_uint() as usize)
+        }
+        // No `TraitVPtr`: the target is the embedded supertrait, so reuse.
+        None => Ok(src_vtable),
+    }
 }
 
 /// Compute the wide-pointer metadata for coercing a pointer to `src_pointee`
