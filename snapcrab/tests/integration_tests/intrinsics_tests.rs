@@ -174,6 +174,24 @@ check_custom_start!(
     result = TestResult::ErrorRegex(r".*exceeds the maximum object size.*".to_string()),
 );
 
+check_custom_start!(
+    test_dyn_size_align,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "dyn_size_align",
+);
+
+check_custom_start!(
+    test_upcast_dyn_size_align,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "upcast_dyn_size_align",
+);
+
+check_custom_start!(
+    test_upcast_dyn_secondary_supertrait,
+    input = "intrinsics/mem_val.rs",
+    start_fn = "upcast_dyn_secondary_supertrait",
+);
+
 // --- Unchecked integer arithmetic ---
 
 check_custom_start!(

@@ -93,6 +93,68 @@ pub fn empty_tail() {
     assert!(std::mem::align_of_val(w) == 8);
 }
 
+/// `dyn Trait`: size and alignment are read from the vtable, so they match the
+/// erased concrete type.
+pub fn dyn_size_align() {
+    use std::fmt::Debug;
+
+    let small: u32 = 0;
+    let small: &dyn Debug = &small;
+    assert!(std::mem::size_of_val(small) == 4);
+    assert!(std::mem::align_of_val(small) == 4);
+
+    let big: u128 = 0;
+    let big: &dyn Debug = &big;
+    assert!(std::mem::size_of_val(big) == 16);
+    assert!(std::mem::align_of_val(big) == 16);
+
+    #[derive(Debug)]
+    #[repr(align(8))]
+    struct Aligned {
+        a: u64,
+        b: u64,
+        c: u8,
+    }
+    let s = Aligned { a: 0, b: 0, c: 0 };
+    let s: &dyn Debug = &s;
+    assert!(std::mem::size_of_val(s) == 24);
+    assert!(std::mem::align_of_val(s) == 8);
+}
+
+/// Trait upcast `&dyn T -> &dyn Y` (with `T: Y`). The vtable header carries the
+/// erased type's size/align, so both survive the upcast to the principal
+/// supertrait.
+pub fn upcast_dyn_size_align() {
+    trait Y {}
+    trait T: Y {}
+    impl Y for u64 {}
+    impl T for u64 {}
+
+    let x: u64 = 0;
+    let t: &dyn T = &x;
+    let y: &dyn Y = t;
+    assert!(std::mem::size_of_val(y) == 8);
+    assert!(std::mem::align_of_val(y) == 8);
+}
+
+/// Upcast to a non-principal supertrait (`trait T: Y + Z`, `&dyn T -> &dyn Z`).
+/// The reused vtable is not `Z`'s, but its header still describes the concrete
+/// type, so size/align remain correct.
+pub fn upcast_dyn_secondary_supertrait() {
+    trait Y {}
+    trait Z {}
+    trait T: Y + Z {}
+    impl Y for u32 {}
+    impl Z for u32 {}
+    impl T for u32 {}
+
+    let x: u32 = 0;
+    let t: &dyn T = &x;
+    let z: &dyn Z = t;
+    assert!(std::mem::size_of_val(z) == 4);
+    assert!(std::mem::align_of_val(z) == 4);
+}
+
 /// A slice whose length exceeds `isize::MAX` bytes must be rejected. The
 /// length is chosen so `len * size_of::<u8>()` does not overflow `usize` (so a
 /// plain `checked_mul` would accept it) but still breaks the `isize::MAX`

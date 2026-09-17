@@ -1,19 +1,21 @@
+use std::any::Any;
+use std::panic::{self, AssertUnwindSafe};
 use std::thread;
 
-use crate::memory::ThreadMemory;
+use crate::interpreter::{intrinsics, native, rvalue};
+use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, anyhow, bail};
+use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{
-    BasicBlockIdx, Body, Mutability, Operand, Place, StatementKind, TerminatorKind,
+    BasicBlockIdx, Body, LocalDecl, Mutability, Operand, Place, StatementKind, TerminatorKind,
 };
 use rustc_public::ty::{
-    Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Ty, TyKind,
+    Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Span, Ty, TyKind,
 };
 use tracing::{debug, info};
-
-use super::rvalue::write_discriminant;
 
 const ALLOC_SHIMS: &[&str] = &[
     "__rust_alloc",
@@ -69,12 +71,7 @@ pub fn invoke_fn(
 
     // Tier 2: intrinsic shims
     if let Some(intrinsic) = instance.intrinsic_name() {
-        return super::intrinsics::eval_intrinsic(
-            intrinsic.as_str(),
-            &args,
-            instance,
-            &memory.check_config,
-        );
+        return intrinsics::eval_intrinsic(intrinsic.as_str(), &args, instance, memory);
     }
 
     // Tier 3: Rust allocator shims -- Use our Heap abstraction.
@@ -102,8 +99,8 @@ pub fn invoke_fn(
     // Tier 4: native call via dlsym
     let config = memory.check_config.clone();
     let jit = &memory.jit;
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::native::call_native(instance, &args, &config, jit)
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        native::call_native(instance, &args, &config, jit)
     }))
     // Turn the panic payload into the source error, keeping its message, and
     // layer the call context on top.
@@ -112,7 +109,7 @@ pub fn invoke_fn(
 }
 
 /// Extract a human-readable message from a caught panic payload.
-pub(crate) fn panic_message(panic: &dyn std::any::Any) -> String {
+pub(crate) fn panic_message(panic: &dyn Any) -> String {
     if let Some(s) = panic.downcast_ref::<&str>() {
         s.to_string()
     } else if let Some(s) = panic.downcast_ref::<String>() {
@@ -222,16 +219,12 @@ impl FnInterpreter<'_> {
     }
 
     /// Get the local declarations for type checking
-    pub(super) fn locals(&self) -> &[rustc_public::mir::LocalDecl] {
+    pub(super) fn locals(&self) -> &[LocalDecl] {
         self.body.locals()
     }
 
     /// Prints the error including the failing thread
-    fn generate_error(
-        &mut self,
-        span: rustc_public::ty::Span,
-        error: anyhow::Error,
-    ) -> anyhow::Error {
+    fn generate_error(&mut self, span: Span, error: anyhow::Error) -> anyhow::Error {
         let include_backtrace = match std::env::var("RUST_BACKTRACE").as_deref() {
             Err(_) | Ok("0") => false,
             Ok(_) => true,
@@ -316,7 +309,7 @@ impl FnInterpreter<'_> {
                 let enum_ty = place.ty(self.locals())?;
                 let addr = self.resolve_place_addr(place)?;
                 let mut enum_val = self.memory.read_addr(addr, enum_ty)?;
-                write_discriminant(enum_val.as_bytes_mut(), enum_ty, *variant_index)?;
+                rvalue::write_discriminant(enum_val.as_bytes_mut(), enum_ty, *variant_index)?;
                 self.memory.write_addr(addr, enum_val.as_bytes(), enum_ty)?;
             }
             StatementKind::StorageLive(_) | StatementKind::StorageDead(_) => {
@@ -541,7 +534,7 @@ impl FnInterpreter<'_> {
             ConstantKind::Allocated(alloc) => {
                 let mut bytes = alloc.raw_bytes()?;
                 // Resolve provenance entries (pointers to other allocations).
-                let ptr_size = crate::memory::pointer_width();
+                let ptr_size = pointer_width();
                 for (offset, prov) in &alloc.provenance.ptrs {
                     let addr = self.memory.resolve_alloc(prov.0)?;
                     let addr_bytes = addr.to_le_bytes();
@@ -617,8 +610,6 @@ fn eval_alloc_shim(name: &str, args: &[Value], memory: &ThreadMemory) -> Result<
 /// Used to untuple the `rust-call` ABI argument bundle. A unit tuple yields
 /// an empty list.
 fn untuple(tuple: &Value, tuple_ty: Ty) -> Result<Vec<Value>> {
-    use rustc_public::abi::FieldsShape;
-
     let TyKind::RigidTy(RigidTy::Tuple(fields)) = tuple_ty.kind() else {
         bail!("expected a tuple for rust-call args, got `{tuple_ty}`");
     };

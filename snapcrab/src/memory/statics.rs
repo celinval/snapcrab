@@ -9,12 +9,13 @@
 use crate::interpreter::native;
 use crate::memory::aligned::AlignedBuf;
 use crate::memory::sanitizer::MemorySanitizer;
-use crate::memory::{MemoryAccessError, MemorySegment};
+use crate::memory::{MemoryAccessError, MemorySegment, pointer_width};
 use crate::ty::contains_mutable_ptr;
 use crate::value::Value;
 use rustc_public::mir::Mutability;
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::{Instance, StaticDef};
+use rustc_public::ty::Allocation;
 use rustc_public::{CrateDef, local_crate};
 use rustc_public_bridge::IndexedVal;
 use std::cell::RefCell;
@@ -69,14 +70,28 @@ impl Statics {
                 }
                 Ok(self.materialize_alloc(alloc_id, &alloc))
             }
-            GlobalAlloc::Function(_) | GlobalAlloc::VTable(..) | GlobalAlloc::TypeId { .. } => {
-                Ok(0)
+            // A vtable resolves to a real memory allocation holding the drop
+            // pointer, the type's size and align, and the method pointers, so
+            // materialize that instead. This backs `dyn Trait` metadata.
+            //
+            // FIXME: The method and drop entries are function pointers, which
+            // materialize as null (see the `Function` arm below). This is
+            // enough for `size_of_val`/`align_of_val`, which only read the
+            // size and align words, but virtual dispatch and dropping through
+            // a trait object need these entries to resolve to callable
+            // functions.
+            GlobalAlloc::VTable(..) => {
+                let vtable = global
+                    .vtable_allocation()
+                    .ok_or_else(|| anyhow::anyhow!("failed to resolve vtable allocation"))?;
+                self.resolve_alloc(vtable)
             }
+            GlobalAlloc::Function(_) | GlobalAlloc::TypeId { .. } => Ok(0),
         }
     }
 
     /// Materialize an allocation into real memory, resolving nested provenance.
-    fn materialize_alloc(&self, alloc_id: AllocId, alloc: &rustc_public::ty::Allocation) -> usize {
+    fn materialize_alloc(&self, alloc_id: AllocId, alloc: &Allocation) -> usize {
         let id_idx = alloc_id.to_index();
 
         // Materialize into an aligned buffer so pointers into the allocation
@@ -93,7 +108,7 @@ impl Statics {
         }
 
         // Resolve provenance: patch pointer-sized segments with real addresses.
-        let ptr_size = crate::memory::pointer_width();
+        let ptr_size = pointer_width();
         for (offset, prov) in &alloc.provenance.ptrs {
             // Nested provenance (e.g., &str pointing to string bytes) cannot
             // be a duplicated mutable static, so unwrap is safe here.

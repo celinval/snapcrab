@@ -1,13 +1,17 @@
+use crate::memory::ThreadMemory;
 use crate::ty::MonoType;
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, bail};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
-use rustc_public::abi::{TagEncoding, VariantsShape};
+use rustc_public::abi::{FieldsShape, Scalar, TagEncoding, VariantsShape};
+use rustc_public::mir::alloc::GlobalAlloc;
 use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
+use rustc_public::target::MachineInfo;
 use rustc_public::ty::{AdtDef, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
+use super::check;
 use super::function::FnInterpreter;
 
 /// Trait for evaluating binary operations on values.
@@ -429,7 +433,7 @@ impl<'a> FnInterpreter<'a> {
     /// Performs a cast operation
     fn perform_cast(
         &self,
-        cast_kind: &rustc_public::mir::CastKind,
+        cast_kind: &CastKind,
         value: Value,
         source_ty: Ty,
         target_ty: Ty,
@@ -466,10 +470,10 @@ impl<'a> FnInterpreter<'a> {
                 }
             }
             CastKind::PointerCoercion(PointerCoercion::Unsize) => {
-                perform_unsized_coercion(value, source_ty, target_ty)
+                perform_unsized_coercion(value, source_ty, target_ty, self.memory)
             }
             CastKind::Transmute => {
-                super::check::validate_value(&value, target_ty, &self.memory.check_config)?;
+                check::validate_value(&value, target_ty, &self.memory.check_config)?;
                 Ok(value)
             }
             _ => bail!("Unsupported cast kind: {:?}", cast_kind),
@@ -487,74 +491,110 @@ impl<'a> FnInterpreter<'a> {
 ///   - Structs containing thin pointers to structs containing wide pointers
 ///   - Conversion between wide pointers.
 ///       - E.g.: `&(dyn Any + Send)` to `&dyn Any`.
-fn perform_unsized_coercion(value: Value, src_ptr_ty: Ty, dst_ptr_ty: Ty) -> Result<Value> {
-    let src_pointee_kind = src_ptr_ty
+fn perform_unsized_coercion(
+    value: Value,
+    src_ptr_ty: Ty,
+    dst_ptr_ty: Ty,
+    memory: &ThreadMemory,
+) -> Result<Value> {
+    let src_pointee = src_ptr_ty
         .kind()
         .builtin_deref(true)
-        .map(|TypeAndMut { ty, .. }| ty.kind())
-        .context("Expected pointer coercion, found source `{src_ptr_ty}`")?;
-    let dst_pointee_kind = dst_ptr_ty
+        .map(|TypeAndMut { ty, .. }| ty)
+        .with_context(|| format!("Expected pointer coercion, found source `{src_ptr_ty}`"))?;
+    let dst_pointee = dst_ptr_ty
         .kind()
         .builtin_deref(true)
-        .map(|TypeAndMut { ty, .. }| ty.kind())
-        .context("Expected pointer coercion, found target `{src_ptr_ty}`")?;
-
-    if src_pointee_kind == dst_pointee_kind {
-        // In case of redundant cast
-        Ok(value)
-    } else if dst_pointee_kind.is_slice() {
-        // [T; N] -> &[T]
-        let data_ptr = value.as_type::<usize>().context("Expected pointer value")?;
-        let TyKind::RigidTy(RigidTy::Array(_, len_const)) = src_pointee_kind else {
-            bail!("Expected array for coercion to slice, but found {dst_ptr_ty}")
-        };
-        let len = len_const.eval_target_usize()? as usize;
-
-        Ok(Value::new_wide_ptr(data_ptr, len))
-    } else if dst_pointee_kind.is_struct() {
-        // Container coercion: &Struct<[T; N]> -> &Struct<[T]>
-        // The data pointer stays the same; we extract the array length from the
-        // source type's unsized tail and use it as slice metadata.
-        let data_ptr = value.as_type::<usize>().context("Expected pointer value")?;
-        let metadata = extract_unsized_metadata(src_pointee_kind)?;
-        Ok(Value::new_wide_ptr(data_ptr, metadata))
+        .map(|TypeAndMut { ty, .. }| ty)
+        .with_context(|| format!("Expected pointer coercion, found target `{dst_ptr_ty}`"))?;
+    // `kind()` translates from rustc's internal representation, so resolve each
+    // pointee's kind once and reuse it.
+    let src_kind = src_pointee.kind();
+    let dst_kind = dst_pointee.kind();
+    // The data pointer is unchanged; the coercion only computes the metadata
+    // to attach. A redundant same-type coercion keeps the value as-is.
+    if src_kind == dst_kind {
+        return Ok(value);
+    }
+    let metadata = if src_kind.is_trait() && dst_kind.is_trait() {
+        // Trait upcast `&dyn T -> &dyn Y`. The concrete type is erased, so the
+        // new vtable is derived from the source's at runtime. The vtable header
+        // (drop/size/align) is shared by all of the object's vtables, so
+        // reusing the source vtable is correct for the principal supertrait and
+        // for `size_of_val`/`align_of_val` in every case.
+        //
+        // FIXME: upcasting to a non-principal supertrait (`trait T: Y + Z`,
+        // `&dyn T -> &dyn Z`) must instead read the matching `TraitVPtr` entry
+        // from the source vtable. That only affects virtual dispatch, which is
+        // not yet supported.
+        value.ptr_metadata()?.read_uint() as usize
     } else {
-        // TODO: support trait object coercion (e.g., &T -> &dyn Trait).
-        // See test_wrapper_dyn_debug.
-        bail!("Unsupported coercion {src_ptr_ty} -> {dst_ptr_ty}")
-    }
+        unsize_metadata(&src_pointee, &src_kind, &dst_pointee, &dst_kind, memory)?
+    };
+    // `to_data_addr` yields the sole address of a thin source or the data half
+    // of a wide one (as in a trait upcast).
+    let data_ptr = value
+        .to_data_addr()?
+        .as_type::<usize>()
+        .context("Expected pointer value")?;
+    Ok(Value::new_wide_ptr(data_ptr, metadata))
 }
 
-/// Extract the metadata for an unsized coercion from the source type.
+/// Compute the wide-pointer metadata for coercing a pointer to `src_pointee`
+/// into one to the unsized `dst_pointee`.
 ///
-/// For container coercion (e.g., Wrapper<[T; N]> → Wrapper<[T]>), this walks
-/// the struct to find the sized tail (an array) and returns its length.
-fn extract_unsized_metadata(src_pointee_kind: TyKind) -> Result<usize> {
-    match src_pointee_kind {
-        TyKind::RigidTy(RigidTy::Array(_, len_const)) => {
-            Ok(len_const.eval_target_usize()? as usize)
-        }
-        TyKind::RigidTy(RigidTy::Adt(def, ref args)) => {
-            // The unsized tail is the last field. Recurse into it.
-            let variants = def.variants();
-            let fields = variants[0].fields();
-            let last_field = fields
-                .last()
-                .context("Expected at least one field in container struct")?;
-            let field_ty = last_field.ty_with_args(args);
-            extract_unsized_metadata(field_ty.kind())
-        }
-        _ => bail!("Cannot extract unsized metadata from {src_pointee_kind:?}"),
+/// - `[T; N] -> [T]`: the metadata is the element count.
+/// - `T -> dyn Trait`: the metadata is the vtable for the concrete type.
+/// - `Struct<Sized> -> Struct<Unsized>`: recurse into the unsized tail field.
+fn unsize_metadata(
+    src_pointee: &Ty,
+    src_kind: &TyKind,
+    dst_pointee: &Ty,
+    dst_kind: &TyKind,
+    memory: &ThreadMemory,
+) -> Result<usize> {
+    if dst_kind.is_slice() {
+        let TyKind::RigidTy(RigidTy::Array(_, len)) = src_kind else {
+            bail!("expected an array source for slice coercion, found `{src_pointee}`");
+        };
+        Ok(len.eval_target_usize()? as usize)
+    } else if dst_kind.is_trait() {
+        let vtable_id = GlobalAlloc::VTable(*src_pointee, dst_kind.trait_principal())
+            .vtable_allocation()
+            .with_context(|| format!("no vtable for `{src_pointee}` as `{dst_pointee}`"))?;
+        memory.resolve_alloc(vtable_id)
+    } else if dst_kind.is_struct() {
+        // The metadata is determined by the structs' unsized tail fields.
+        let src_tail = last_field_ty(src_kind)?;
+        let dst_tail = last_field_ty(dst_kind)?;
+        unsize_metadata(
+            &src_tail,
+            &src_tail.kind(),
+            &dst_tail,
+            &dst_tail.kind(),
+            memory,
+        )
+    } else {
+        bail!("unsupported unsized coercion to `{dst_pointee}`")
     }
 }
 
-fn tag_scalar_size(
-    tag: &rustc_public::abi::Scalar,
-    target: &rustc_public::target::MachineInfo,
-) -> usize {
+/// The type of a struct's last field (its potentially-unsized tail).
+fn last_field_ty(kind: &TyKind) -> Result<Ty> {
+    let TyKind::RigidTy(RigidTy::Adt(def, args)) = kind else {
+        bail!("expected a struct, found `{kind:?}`");
+    };
+    let field = def
+        .variants()
+        .first()
+        .and_then(|variant| variant.fields().last().cloned())
+        .context("struct has no fields")?;
+    Ok(field.ty_with_args(args))
+}
+
+fn tag_scalar_size(tag: &Scalar, target: &MachineInfo) -> usize {
     let prim = match tag {
-        rustc_public::abi::Scalar::Initialized { value, .. }
-        | rustc_public::abi::Scalar::Union { value } => *value,
+        Scalar::Initialized { value, .. } | Scalar::Union { value } => *value,
     };
     prim.size(target).bytes()
 }
@@ -581,12 +621,10 @@ pub(super) fn read_discriminant(enum_val: &Value, enum_ty: Ty) -> Result<Value> 
             tag_field,
             ..
         } => {
-            let target = rustc_public::target::MachineInfo::target();
+            let target = MachineInfo::target();
             let tag_sz = tag_scalar_size(tag, &target);
             let tag_off = match &shape.fields {
-                rustc_public::abi::FieldsShape::Arbitrary { offsets } => {
-                    offsets[*tag_field].bytes()
-                }
+                FieldsShape::Arbitrary { offsets } => offsets[*tag_field].bytes(),
                 _ => bail!("Unexpected field shape for enum"),
             };
             let tag_bytes = &enum_val.as_bytes()[tag_off..tag_off + tag_sz];
@@ -642,12 +680,10 @@ pub(super) fn write_discriminant(
             tag_field,
             ..
         } => {
-            let target = rustc_public::target::MachineInfo::target();
+            let target = MachineInfo::target();
             let tag_sz = tag_scalar_size(tag, &target);
             let tag_off = match &shape.fields {
-                rustc_public::abi::FieldsShape::Arbitrary { offsets } => {
-                    offsets[*tag_field].bytes()
-                }
+                FieldsShape::Arbitrary { offsets } => offsets[*tag_field].bytes(),
                 _ => bail!("Unexpected field shape for enum"),
             };
 
@@ -694,7 +730,7 @@ fn build_enum_variant(
     let offsets = match &shape.variants {
         VariantsShape::Multiple { variants, .. } => &variants[variant_idx.to_index()].offsets,
         VariantsShape::Single { .. } => match &shape.fields {
-            rustc_public::abi::FieldsShape::Arbitrary { offsets } => offsets,
+            FieldsShape::Arbitrary { offsets } => offsets,
             _ => return Ok(result),
         },
         _ => return Ok(result),

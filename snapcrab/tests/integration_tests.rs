@@ -848,7 +848,6 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_wrapper_dyn_debug,
     input = "wide_ptr.rs",
     start_fn = "test_wrapper_dyn_debug",

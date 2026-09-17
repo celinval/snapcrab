@@ -5,7 +5,8 @@
 
 use std::mem;
 
-use crate::interpreter::check::{CheckConfig, validate_value};
+use crate::interpreter::check::validate_value;
+use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
@@ -19,9 +20,10 @@ pub fn eval_intrinsic(
     name: &str,
     args: &[Value],
     instance: Instance,
-    config: &CheckConfig,
+    memory: &ThreadMemory,
 ) -> Result<Value> {
     debug!("Intrinsic: {name}");
+    let config = &memory.check_config;
     match name {
         "assume" => {
             let val = args[0].as_bool().unwrap();
@@ -54,11 +56,15 @@ pub fn eval_intrinsic(
         // pointer's metadata (slice length, `str` byte length).
         "size_of_val" => {
             let ty = intrinsic_type_arg(instance, 0)?;
-            Ok(Value::from_type(size_and_align_of_val(ty, &args[0])?.0))
+            Ok(Value::from_type(
+                size_and_align_of_val(ty, &args[0], memory)?.0,
+            ))
         }
         "align_of_val" | "min_align_of_val" => {
             let ty = intrinsic_type_arg(instance, 0)?;
-            Ok(Value::from_type(size_and_align_of_val(ty, &args[0])?.1))
+            Ok(Value::from_type(
+                size_and_align_of_val(ty, &args[0], memory)?.1,
+            ))
         }
         // count ones -- read_uint extend integer with "0" bits, then count ones
         "ctpop" => Ok(Value::from_type(args[0].read_uint().count_ones())),
@@ -95,13 +101,13 @@ pub fn eval_intrinsic(
 }
 
 /// Extract the return type of a transmute intrinsic from its instance.
-fn transmute_return_ty(instance: Instance) -> Result<rustc_public::ty::Ty> {
+fn transmute_return_ty(instance: Instance) -> Result<Ty> {
     // transmute<T, U>(src: T) -> U; the second generic arg is the return type.
     intrinsic_type_arg(instance, 1)
 }
 
 /// Extract the `n`th generic type argument of an intrinsic instance.
-fn intrinsic_type_arg(instance: Instance, n: usize) -> Result<rustc_public::ty::Ty> {
+fn intrinsic_type_arg(instance: Instance, n: usize) -> Result<Ty> {
     let ty = instance.ty();
     let TyKind::RigidTy(RigidTy::FnDef(_, args)) = ty.kind() else {
         bail!("cannot read generic args of `{}`", instance.name());
@@ -167,12 +173,9 @@ const MAX_OBJECT_SIZE: usize = isize::MAX as usize;
 /// Compute the runtime `(size, align)` in bytes of the value `ty` points to.
 ///
 /// Sized types ignore the pointer. Unsized types read from the pointer's
-/// metadata: slices/`str` from the element count, and an ADT/tuple with an
-/// unsized tail from that tail, recursively.
-///
-/// TODO: `dyn Trait` (and any tail ending in one) takes its size and alignment
-/// from the vtable, which is not modeled yet.
-fn size_and_align_of_val(ty: Ty, ptr: &Value) -> Result<(usize, usize)> {
+/// metadata: slices/`str` from the element count, `dyn Trait` from its vtable,
+/// and an ADT/tuple with an unsized tail from that tail, recursively.
+fn size_and_align_of_val(ty: Ty, ptr: &Value, memory: &ThreadMemory) -> Result<(usize, usize)> {
     match ty.kind() {
         TyKind::RigidTy(RigidTy::Slice(elem)) => {
             let len = ptr.ptr_metadata()?.read_uint() as usize;
@@ -193,20 +196,40 @@ fn size_and_align_of_val(ty: Ty, ptr: &Value) -> Result<(usize, usize)> {
             ptr.ptr_metadata()?.read_uint() as usize,
             mem::align_of::<u8>(),
         )),
+        // `dyn Trait`: the metadata is a vtable pointer whose header holds the
+        // erased type's size and alignment.
         TyKind::RigidTy(RigidTy::Dynamic(..)) => {
-            bail!("`size_of_val`/`align_of_val` do not yet support `dyn Trait` types")
+            size_align_from_vtable(ptr.ptr_metadata()?.read_uint() as usize, memory)
         }
         // An ADT or tuple whose last field is unsized.
-        _ if ty.is_unsized()? => unsized_tail_size_and_align(ty, ptr),
+        _ if ty.is_unsized()? => unsized_tail_size_and_align(ty, ptr, memory),
         _ => Ok((ty.size()?, ty.alignment()?)),
     }
+}
+
+/// Read the erased type's `(size, align)` from a vtable.
+///
+/// A vtable's header is `[drop_in_place, size, align, ...methods]`, so the size
+/// and alignment sit one and two pointer widths past the base.
+fn size_align_from_vtable(vtable: usize, memory: &ThreadMemory) -> Result<(usize, usize)> {
+    let word = pointer_width();
+    let read = |offset: usize| -> Result<usize> {
+        Ok(memory
+            .read_addr(vtable + offset, Ty::usize_ty())?
+            .read_uint() as usize)
+    };
+    Ok((read(word)?, read(2 * word)?))
 }
 
 /// Compute `(size, align)` for an aggregate (`struct`/tuple) with an unsized
 /// tail, following rustc's rule: the tail sits at its field offset, the whole
 /// alignment is the larger of the sized prefix's and the tail's, and the size
 /// is the tail's end rounded up to that alignment.
-fn unsized_tail_size_and_align(ty: Ty, ptr: &Value) -> Result<(usize, usize)> {
+fn unsized_tail_size_and_align(
+    ty: Ty,
+    ptr: &Value,
+    memory: &ThreadMemory,
+) -> Result<(usize, usize)> {
     let shape = ty.layout()?.shape();
     let FieldsShape::Arbitrary { offsets } = &shape.fields else {
         bail!("unsized type `{ty}` has no field layout");
@@ -216,7 +239,7 @@ fn unsized_tail_size_and_align(ty: Ty, ptr: &Value) -> Result<(usize, usize)> {
         .with_context(|| format!("unsized type `{ty}` has no fields"))?
         .bytes();
 
-    let (tail_size, tail_align) = size_and_align_of_val(unsized_tail_ty(ty)?, ptr)?;
+    let (tail_size, tail_align) = size_and_align_of_val(unsized_tail_ty(ty)?, ptr, memory)?;
     let align = (shape.abi_align as usize).max(tail_align);
 
     // Round the tail's end up to the aggregate's alignment, then enforce the
