@@ -99,6 +99,23 @@ pub fn eval_intrinsic(
             unreachable!("internal error: unexpected `intrinsics::needs_drop` call.");
         }
         "black_box" => Ok(args[0].clone()),
+        // Reverse byte order. The value's bytes are little-endian, so reversing
+        // the byte slice is the byte swap, for any integer width.
+        "bswap" => {
+            let mut bytes = args[0].as_bytes().to_vec();
+            bytes.reverse();
+            Ok(Value::from_bytes(&bytes))
+        }
+        // Reverse the bit order: reverse the bytes and the bits within each.
+        "bitreverse" => {
+            let bytes: Vec<u8> = args[0]
+                .as_bytes()
+                .iter()
+                .rev()
+                .map(|b| b.reverse_bits())
+                .collect();
+            Ok(Value::from_bytes(&bytes))
+        }
         // Saturating arithmetic clamps to the type's bounds instead of
         // wrapping. The generic type is the intrinsic's first type argument.
         "saturating_add" => saturating_add(intrinsic_type_arg(instance, 0)?, &args[0], &args[1]),
