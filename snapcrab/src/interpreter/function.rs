@@ -10,7 +10,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{
-    BasicBlockIdx, Body, LocalDecl, Mutability, Operand, Place, StatementKind, TerminatorKind,
+    BasicBlockIdx, Body, LocalDecl, Mutability, NonDivergingIntrinsic, Operand, Place,
+    StatementKind, TerminatorKind,
 };
 use rustc_public::ty::{
     Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Span, Ty, TyKind,
@@ -336,6 +337,17 @@ impl FnInterpreter<'_> {
             }
             StatementKind::Nop => {
                 // Do nothing
+            }
+            // `assume(cond)` is an optimizer hint; assuming a false condition is
+            // UB, so we validate it like the `assume` intrinsic.
+            StatementKind::Intrinsic(NonDivergingIntrinsic::Assume(op)) => {
+                let cond = self.evaluate_operand(op)?;
+                if !cond
+                    .as_bool()
+                    .context("`assume` operand is not a boolean")?
+                {
+                    bail!("`assume` invoked with a false condition, which is UB");
+                }
             }
             _ => {
                 bail!("Unsupported statement: {:?}", statement_kind);
