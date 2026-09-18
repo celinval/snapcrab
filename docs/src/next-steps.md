@@ -12,10 +12,6 @@ Roughly in priority order (top first):
 - **`PassMode::Cast` in the native ABI.** Passing/returning small structs and
   arrays by value across the C ABI. The single largest bucket of ignored
   tests. Needs `CastTarget` exposed from rustc_public (see below).
-- **`Rem` (`%`) and the remaining bit intrinsics** (`bswap`, `bitreverse`,
-  rotate). Small, self-contained additions.
-- **`Assume` intrinsic statement** (`StatementKind::Intrinsic(Assume)`), used
-  by e.g. `Result::map`/`and_then`.
 - **Float comparison** (`Eq`/ordering on `f32`/`f64`).
 - **`copy_nonoverlapping` statement**, which also unblocks SIMD tests.
 - **Smart-pointer unsizing coercion.** `Rc<T>`/`Arc<T>`/`Pin<&mut T> -> dyn`

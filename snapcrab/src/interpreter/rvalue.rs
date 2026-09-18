@@ -3,8 +3,8 @@ use crate::ty::MonoType;
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, anyhow, bail};
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, WrappingAdd, WrappingMul,
-    WrappingSub, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, WrappingAdd,
+    WrappingMul, WrappingSub, Zero,
 };
 use rustc_public::CrateDefType;
 use rustc_public::abi::{FieldsShape, Scalar, TagEncoding, VariantsShape};
@@ -125,6 +125,7 @@ where
         + CheckedAdd
         + CheckedDiv
         + CheckedMul
+        + CheckedRem
         + CheckedSub
         + WrappingAdd
         + WrappingSub
@@ -164,6 +165,14 @@ where
                 bail!("Division by zero");
             }
             left.checked_div(&right)
+                .map(Value::from_type)
+                .with_context(|| format!("Attempt to {op:?} with overflow"))
+        }
+        BinOp::Rem => {
+            if right == <T as Zero>::zero() {
+                bail!("Remainder by zero");
+            }
+            left.checked_rem(&right)
                 .map(Value::from_type)
                 .with_context(|| format!("Attempt to {op:?} with overflow"))
         }

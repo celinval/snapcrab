@@ -63,14 +63,12 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_result_map,
     input = "std_ops/result.rs",
     start_fn = "test_result_map",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_result_and_then,
     input = "std_ops/result.rs",
     start_fn = "test_result_and_then",
@@ -145,14 +143,12 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_swap_bytes,
     input = "std_ops/numeric.rs",
     start_fn = "test_swap_bytes",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_rotate_left,
     input = "std_ops/numeric.rs",
     start_fn = "test_rotate_left",
