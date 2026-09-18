@@ -10,11 +10,13 @@ use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::MonoType;
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
+use num_traits::{SaturatingAdd, SaturatingSub};
 use rustc_public::CrateDefType;
 use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::Instance;
-use rustc_public::ty::{AdtKind, GenericArgs, RigidTy, Ty, TyKind, VariantDef};
+use rustc_public::ty::{AdtKind, GenericArgs, IntTy, RigidTy, Ty, TyKind, UintTy, VariantDef};
 use tracing::debug;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 /// Evaluate a compiler intrinsic.
 pub fn eval_intrinsic(
@@ -97,7 +99,71 @@ pub fn eval_intrinsic(
             unreachable!("internal error: unexpected `intrinsics::needs_drop` call.");
         }
         "black_box" => Ok(args[0].clone()),
+        // Saturating arithmetic clamps to the type's bounds instead of
+        // wrapping. The generic type is the intrinsic's first type argument.
+        "saturating_add" => saturating_add(intrinsic_type_arg(instance, 0)?, &args[0], &args[1]),
+        "saturating_sub" => saturating_sub(intrinsic_type_arg(instance, 0)?, &args[0], &args[1]),
         _ => bail!("Unimplemented intrinsic `{name}` in `{}`", instance.name()),
+    }
+}
+
+/// Evaluate a `saturating_add` intrinsic, dispatching on the operand type.
+fn saturating_add(ty: Ty, a: &Value, b: &Value) -> Result<Value> {
+    fn add<T: FromBytes + IntoBytes + Immutable + SaturatingAdd>(a: &Value, b: &Value) -> Value {
+        Value::from_type(
+            a.as_type::<T>()
+                .unwrap()
+                .saturating_add(&b.as_type::<T>().unwrap()),
+        )
+    }
+    match ty.kind() {
+        TyKind::RigidTy(RigidTy::Int(int_ty)) => Ok(match int_ty {
+            IntTy::I8 => add::<i8>(a, b),
+            IntTy::I16 => add::<i16>(a, b),
+            IntTy::I32 => add::<i32>(a, b),
+            IntTy::I64 => add::<i64>(a, b),
+            IntTy::I128 => add::<i128>(a, b),
+            IntTy::Isize => add::<isize>(a, b),
+        }),
+        TyKind::RigidTy(RigidTy::Uint(uint_ty)) => Ok(match uint_ty {
+            UintTy::U8 => add::<u8>(a, b),
+            UintTy::U16 => add::<u16>(a, b),
+            UintTy::U32 => add::<u32>(a, b),
+            UintTy::U64 => add::<u64>(a, b),
+            UintTy::U128 => add::<u128>(a, b),
+            UintTy::Usize => add::<usize>(a, b),
+        }),
+        _ => bail!("`saturating_add` is not supported on `{ty}`"),
+    }
+}
+
+/// Evaluate a `saturating_sub` intrinsic, dispatching on the operand type.
+fn saturating_sub(ty: Ty, a: &Value, b: &Value) -> Result<Value> {
+    fn sub<T: FromBytes + IntoBytes + Immutable + SaturatingSub>(a: &Value, b: &Value) -> Value {
+        Value::from_type(
+            a.as_type::<T>()
+                .unwrap()
+                .saturating_sub(&b.as_type::<T>().unwrap()),
+        )
+    }
+    match ty.kind() {
+        TyKind::RigidTy(RigidTy::Int(int_ty)) => Ok(match int_ty {
+            IntTy::I8 => sub::<i8>(a, b),
+            IntTy::I16 => sub::<i16>(a, b),
+            IntTy::I32 => sub::<i32>(a, b),
+            IntTy::I64 => sub::<i64>(a, b),
+            IntTy::I128 => sub::<i128>(a, b),
+            IntTy::Isize => sub::<isize>(a, b),
+        }),
+        TyKind::RigidTy(RigidTy::Uint(uint_ty)) => Ok(match uint_ty {
+            UintTy::U8 => sub::<u8>(a, b),
+            UintTy::U16 => sub::<u16>(a, b),
+            UintTy::U32 => sub::<u32>(a, b),
+            UintTy::U64 => sub::<u64>(a, b),
+            UintTy::U128 => sub::<u128>(a, b),
+            UintTy::Usize => sub::<usize>(a, b),
+        }),
+        _ => bail!("`saturating_sub` is not supported on `{ty}`"),
     }
 }
 

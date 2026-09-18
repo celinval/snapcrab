@@ -2,7 +2,10 @@ use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::MonoType;
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, anyhow, bail};
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, Zero};
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, WrappingAdd, WrappingMul,
+    WrappingSub, Zero,
+};
 use rustc_public::CrateDefType;
 use rustc_public::abi::{FieldsShape, Scalar, TagEncoding, VariantsShape};
 use rustc_public::mir::alloc::GlobalAlloc;
@@ -123,6 +126,9 @@ where
         + CheckedDiv
         + CheckedMul
         + CheckedSub
+        + WrappingAdd
+        + WrappingSub
+        + WrappingMul
         + PartialEq
         + PartialOrd
         + Zero
@@ -133,17 +139,23 @@ where
     let left = l.as_type::<T>().unwrap();
     let right = r.as_type::<T>().unwrap();
     match op {
-        // Unchecked variants are UB on overflow, so detecting it (via the
-        // checked op) is a sound, stricter interpretation.
-        BinOp::Add | BinOp::AddUnchecked => left
+        // Plain arithmetic wraps (two's complement): MIR performs overflow
+        // *checking* separately via `CheckedBinaryOp` + an `assert`, and lowers
+        // `wrapping_add`/etc. to these plain ops. The `*Unchecked` variants are
+        // instead UB on overflow, so detecting it (via the checked op) is a
+        // sound, stricter interpretation.
+        BinOp::Add => Ok(Value::from_type(left.wrapping_add(&right))),
+        BinOp::Sub => Ok(Value::from_type(left.wrapping_sub(&right))),
+        BinOp::Mul => Ok(Value::from_type(left.wrapping_mul(&right))),
+        BinOp::AddUnchecked => left
             .checked_add(&right)
             .map(Value::from_type)
             .with_context(|| format!("Attempt to {op:?} with overflow")),
-        BinOp::Sub | BinOp::SubUnchecked => left
+        BinOp::SubUnchecked => left
             .checked_sub(&right)
             .map(Value::from_type)
             .with_context(|| format!("Attempt to {op:?} with overflow")),
-        BinOp::Mul | BinOp::MulUnchecked => left
+        BinOp::MulUnchecked => left
             .checked_mul(&right)
             .map(Value::from_type)
             .with_context(|| format!("Attempt to {op:?} with overflow")),
@@ -166,6 +178,66 @@ where
         BinOp::Ge => Ok(Value::from_bool(left >= right)),
         _ => bail!("Unsupported integer binary operation: {:?}", op),
     }
+}
+
+/// Evaluate a `CheckedBinaryOp` (`Add`/`Sub`/`Mul`), returning the wrapped
+/// result and whether the operation overflowed, dispatching on the type.
+fn eval_checked_binop(op: BinOp, l: &Value, r: &Value, ty: RigidTy) -> Result<(Value, bool)> {
+    match ty {
+        RigidTy::Int(int_ty) => match int_ty {
+            IntTy::I8 => checked_int_binop::<i8>(op, l, r),
+            IntTy::I16 => checked_int_binop::<i16>(op, l, r),
+            IntTy::I32 => checked_int_binop::<i32>(op, l, r),
+            IntTy::I64 => checked_int_binop::<i64>(op, l, r),
+            IntTy::I128 => checked_int_binop::<i128>(op, l, r),
+            IntTy::Isize => checked_int_binop::<isize>(op, l, r),
+        },
+        RigidTy::Uint(uint_ty) => match uint_ty {
+            UintTy::U8 => checked_int_binop::<u8>(op, l, r),
+            UintTy::U16 => checked_int_binop::<u16>(op, l, r),
+            UintTy::U32 => checked_int_binop::<u32>(op, l, r),
+            UintTy::U64 => checked_int_binop::<u64>(op, l, r),
+            UintTy::U128 => checked_int_binop::<u128>(op, l, r),
+            UintTy::Usize => checked_int_binop::<usize>(op, l, r),
+        },
+        _ => bail!(
+            "Unsupported checked binary operation on `{}` type",
+            Ty::from_rigid_kind(ty)
+        ),
+    }
+}
+
+/// Compute `(wrapped result, overflowed)` for a checked `Add`/`Sub`/`Mul`.
+fn checked_int_binop<T>(op: BinOp, l: &Value, r: &Value) -> Result<(Value, bool)>
+where
+    T: FromBytes
+        + IntoBytes
+        + Immutable
+        + CheckedAdd
+        + CheckedSub
+        + CheckedMul
+        + WrappingAdd
+        + WrappingSub
+        + WrappingMul,
+{
+    let left = l.as_type::<T>().unwrap();
+    let right = r.as_type::<T>().unwrap();
+    let (wrapped, overflow) = match op {
+        BinOp::Add => (
+            left.wrapping_add(&right),
+            left.checked_add(&right).is_none(),
+        ),
+        BinOp::Sub => (
+            left.wrapping_sub(&right),
+            left.checked_sub(&right).is_none(),
+        ),
+        BinOp::Mul => (
+            left.wrapping_mul(&right),
+            left.checked_mul(&right).is_none(),
+        ),
+        _ => bail!("Unsupported checked binary operation: {op:?}"),
+    };
+    Ok((Value::from_type(wrapped), overflow))
 }
 
 /// Evaluates a comparison on wide pointers (both halves must match).
@@ -347,15 +419,11 @@ impl<'a> FnInterpreter<'a> {
                 let right_val = self.evaluate_operand(right)?;
                 let operand_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
                 let result_ty = rvalue.ty(self.locals())?;
-                match op.eval(&left_val, &right_val, operand_type) {
-                    Ok(val) => {
-                        Value::from_tuple_with_layout(&[val, Value::from_bool(false)], result_ty)
-                    }
-                    Err(_) => {
-                        let zero = Value::with_size(left_val.len());
-                        Value::from_tuple_with_layout(&[zero, Value::from_bool(true)], result_ty)
-                    }
-                }
+                // The tuple is `(wrapped result, overflowed)`. `op.eval` wraps,
+                // so the overflow flag has to be computed separately.
+                let (result, overflow) =
+                    eval_checked_binop(*op, &left_val, &right_val, operand_type)?;
+                Value::from_tuple_with_layout(&[result, Value::from_bool(overflow)], result_ty)
             }
             Rvalue::Discriminant(place) => {
                 let enum_ty = place.ty(self.locals())?;
@@ -765,7 +833,7 @@ pub(super) fn write_discriminant(
                     }
                     let niche_start_idx = niche_variants.start().to_index();
                     let relative = variant_idx.to_index() - niche_start_idx;
-                    niche_start.wrapping_add(relative as u128)
+                    niche_start.wrapping_add(&(relative as u128))
                 }
             };
             write_uint(&mut enum_val[tag_off..tag_off + tag_sz], tag_val);
@@ -839,13 +907,17 @@ mod tests {
     }
 
     #[test]
-    fn test_int_overflow() {
-        let result = BinOp::Add.eval(
-            &Value::from_type(i128::MAX),
-            &Value::from_type(1i128),
-            RigidTy::Int(IntTy::I128),
-        );
-        assert!(result.is_err());
+    fn test_int_wraps_on_overflow() {
+        // Plain `Add` wraps (two's complement); overflow is detected separately
+        // via `CheckedBinaryOp`, not by `BinOp::Add` itself erroring.
+        let result = BinOp::Add
+            .eval(
+                &Value::from_type(i128::MAX),
+                &Value::from_type(1i128),
+                RigidTy::Int(IntTy::I128),
+            )
+            .unwrap();
+        assert_eq!(result, Value::from_type(i128::MIN));
     }
 
     #[test]

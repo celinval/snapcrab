@@ -12,9 +12,6 @@ Roughly in priority order (top first):
 - **`PassMode::Cast` in the native ABI.** Passing/returning small structs and
   arrays by value across the C ABI. The single largest bucket of ignored
   tests. Needs `CastTarget` exposed from rustc_public (see below).
-- **Wrapping / saturating / overflowing arithmetic.** `wrapping_add/sub`,
-  `saturating_add/sub`, and the `overflowing_*` family. Today `+`/`-` are
-  evaluated as checked and error on overflow.
 - **`Rem` (`%`) and the remaining bit intrinsics** (`bswap`, `bitreverse`,
   rotate). Small, self-contained additions.
 - **`Assume` intrinsic statement** (`StatementKind::Intrinsic(Assume)`), used

@@ -91,28 +91,24 @@ check_custom_start!(
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_wrapping_add,
     input = "std_ops/numeric.rs",
     start_fn = "test_wrapping_add",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_wrapping_sub,
     input = "std_ops/numeric.rs",
     start_fn = "test_wrapping_sub",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_saturating_add,
     input = "std_ops/numeric.rs",
     start_fn = "test_saturating_add",
 );
 
 check_custom_start!(
-    #[ignore]
     test_std_saturating_sub,
     input = "std_ops/numeric.rs",
     start_fn = "test_saturating_sub",
