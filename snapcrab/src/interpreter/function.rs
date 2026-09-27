@@ -4,7 +4,7 @@ use std::thread;
 
 use crate::interpreter::{intrinsics, native, rvalue};
 use crate::memory::{ThreadMemory, pointer_width};
-use crate::ty::MonoType;
+use crate::ty::{MonoType, pointee_ty};
 use crate::value::Value;
 use anyhow::{Context, Result, anyhow, bail};
 use rustc_public::abi::FieldsShape;
@@ -348,6 +348,16 @@ impl FnInterpreter<'_> {
                 {
                     bail!("`assume` invoked with a false condition, which is UB");
                 }
+            }
+            // `copy_nonoverlapping(src, dst, count)`: copy `count` elements,
+            // whose type is the source pointer's pointee.
+            StatementKind::Intrinsic(NonDivergingIntrinsic::CopyNonOverlapping(copy)) => {
+                let src = self.evaluate_operand(&copy.src)?.read_uint() as usize;
+                let dst = self.evaluate_operand(&copy.dst)?.read_uint() as usize;
+                let count = self.evaluate_operand(&copy.count)?.read_uint() as usize;
+                let elem_size = pointee_ty(copy.src.ty(self.locals())?)?.size()?;
+                self.memory
+                    .copy_nonoverlapping(src, dst, count * elem_size)?;
             }
             _ => {
                 bail!("Unsupported statement: {:?}", statement_kind);

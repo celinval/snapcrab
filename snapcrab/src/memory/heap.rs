@@ -124,6 +124,13 @@ impl Heap {
     }
 }
 
+impl Heap {
+    /// Whether `[address, address + size)` lies within a live heap allocation.
+    pub fn contains(&self, address: usize, size: usize) -> bool {
+        self.0.read().unwrap().sanitizer.contains(address, size)
+    }
+}
+
 // SAFETY: Backing allocations live in `AlignedBuf`s whose addresses are stable
 // until freed. The sanitizer tracks their ranges and validates every access.
 unsafe impl MemorySegment for Heap {

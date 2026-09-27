@@ -95,6 +95,11 @@ impl Stack {
     pub fn local_address(&self, local: usize) -> Result<usize> {
         self.frames.last().unwrap().local_address(local)
     }
+
+    /// Whether `[address, address + size)` lies within a live stack allocation.
+    pub fn contains(&self, address: usize, size: usize) -> bool {
+        self.sanitizer.contains(address, size)
+    }
 }
 
 /// Stack frame for function execution.

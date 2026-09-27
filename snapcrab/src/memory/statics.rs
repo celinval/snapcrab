@@ -99,6 +99,14 @@ impl Statics {
         self.code.borrow_mut().reify(instance)
     }
 
+    /// Whether `[address, address + size)` lies within a static allocation.
+    ///
+    /// The code segment is deliberately excluded: function memory is callable,
+    /// not a valid copy source or destination.
+    pub fn contains(&self, address: usize, size: usize) -> bool {
+        self.inner.borrow().sanitizer.contains(address, size)
+    }
+
     /// Resolve a reified function address back to its `Instance`.
     pub fn resolve_fn(&self, addr: usize) -> anyhow::Result<Instance> {
         self.code.borrow().resolve(addr)

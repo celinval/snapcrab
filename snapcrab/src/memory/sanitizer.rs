@@ -61,10 +61,9 @@ impl MemorySanitizer {
     /// Check whether an address range is valid, partially valid, or not found.
     pub fn check_access(&self, address: usize, size: usize) -> Result<(), MemoryAccessError> {
         if let Some((&start, &alloc_size)) = self.allocations.range(..=address).next_back() {
-            if address >= start && address < start + alloc_size {
-                let request_end = address + size;
-                let alloc_end = start + alloc_size;
-                if request_end <= alloc_end {
+            let alloc_end = start + alloc_size;
+            if address >= start && address < alloc_end {
+                if alloc_end - address >= size {
                     Ok(())
                 } else {
                     Err(MemoryAccessError::OutOfBounds)
@@ -138,6 +137,25 @@ mod tests {
         // This should panic due to overlap
         let slice2 = &buffer[90..110]; // 20 bytes, overlaps at start
         tracker.register_alloc(slice2);
+    }
+
+    /// A size that overflows the address is reported as out of bounds.
+    ///
+    /// One byte past the point where `addr + size` overflows `usize` must be
+    /// rejected as out of bounds, not panic (debug) or wrap and be wrongly
+    /// accepted (release).
+    #[test]
+    fn test_check_access_size_overflows_pointer() {
+        let mut tracker = MemorySanitizer::default();
+        let buffer = vec![0u8; 64];
+        tracker.register_alloc(&buffer);
+        let addr = buffer.as_ptr() as usize;
+
+        let size = (usize::MAX - addr) + 1;
+        assert!(matches!(
+            tracker.check_access(addr, size),
+            Err(MemoryAccessError::OutOfBounds)
+        ));
     }
 
     #[test]

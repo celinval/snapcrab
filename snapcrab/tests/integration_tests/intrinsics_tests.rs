@@ -211,3 +211,23 @@ check_custom_start!(
     input = "intrinsics/unchecked_arith.rs",
     start_fn = "unchecked_mul",
 );
+
+// --- `copy_nonoverlapping` / `copy` ---
+
+check_custom_start!(
+    test_copy_nonoverlapping_basic,
+    input = "intrinsics/mem_copy.rs",
+    start_fn = "copy_nonoverlapping_basic",
+);
+
+check_custom_start!(
+    test_copy_nonoverlapping_structs,
+    input = "intrinsics/mem_copy.rs",
+    start_fn = "copy_nonoverlapping_structs",
+);
+
+check_custom_start!(
+    test_copy_overlapping,
+    input = "intrinsics/mem_copy.rs",
+    start_fn = "copy_overlapping",
+);

@@ -1,5 +1,5 @@
 //! Module with type extensions.
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rustc_public::CrateDefType;
 use rustc_public::abi::{Primitive, Scalar, ValueAbi};
 use rustc_public::mir::Mutability;
@@ -50,6 +50,14 @@ impl MonoType for Ty {
         let ptr_size = crate::memory::pointer_width();
         self.kind().is_any_ptr() && self.size().ok() == Some(2 * ptr_size)
     }
+}
+
+/// The pointee type of a pointer or reference type.
+pub fn pointee_ty(ty: Ty) -> Result<Ty> {
+    ty.kind()
+        .builtin_deref(true)
+        .map(|t| t.ty)
+        .with_context(|| format!("expected a pointer type, got `{ty}`"))
 }
 
 /// Check if a type contains a mutable pointer (`&mut T` or `*mut T`).

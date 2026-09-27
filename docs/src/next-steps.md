@@ -13,7 +13,6 @@ Roughly in priority order (top first):
   arrays by value across the C ABI. The single largest bucket of ignored
   tests. Needs `CastTarget` exposed from rustc_public (see below).
 - **Float comparison** (`Eq`/ordering on `f32`/`f64`).
-- **`copy_nonoverlapping` statement**, which also unblocks SIMD tests.
 - **Smart-pointer unsizing coercion.** `Rc<T>`/`Arc<T>`/`Pin<&mut T> -> dyn`
   goes through the pointer's own `CoerceUnsized` impl (the data pointer lives
   in a field), which the coercion path does not yet handle.

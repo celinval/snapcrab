@@ -23,7 +23,7 @@ pub fn eval_intrinsic(
     name: &str,
     args: &[Value],
     instance: Instance,
-    memory: &ThreadMemory,
+    memory: &mut ThreadMemory,
 ) -> Result<Value> {
     debug!("Intrinsic: {name}");
     let config = &memory.check_config;
@@ -115,6 +115,22 @@ pub fn eval_intrinsic(
                 .map(|b| b.reverse_bits())
                 .collect();
             Ok(Value::from_bytes(&bytes))
+        }
+        // `copy`/`copy_nonoverlapping::<T>(src, dst, count)`
+        "copy" | "copy_nonoverlapping" => {
+            let elem_size = intrinsic_type_arg(instance, 0)?.size()?;
+            let src = args[0].read_uint() as usize;
+            let dst = args[1].read_uint() as usize;
+            let len = args[2].read_uint() as usize;
+            let size = len * elem_size;
+            if size != 0 {
+                if name == "copy_nonoverlapping" {
+                    memory.copy_nonoverlapping(src, dst, size)?;
+                } else {
+                    memory.copy(src, dst, size)?;
+                }
+            }
+            Ok(Value::unit().clone())
         }
         // Saturating arithmetic clamps to the type's bounds instead of
         // wrapping. The generic type is the intrinsic's first type argument.

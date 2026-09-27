@@ -254,6 +254,55 @@ impl ThreadMemory {
             }
         }
     }
+
+    /// Copy `size` bytes from `src` to `dst`, allowing the ranges to overlap.
+    ///
+    /// Has `ptr::copy` semantics; both ranges are bounds-checked first.
+    pub fn copy(&mut self, src: usize, dst: usize, size: usize) -> Result<()> {
+        self.check_readable(src, size)?;
+        self.check_writable(dst, size)?;
+        // SAFETY: both ranges lie within live allocations (checked above), and
+        // the interpreter's memory is backed by real, correctly-sized buffers.
+        unsafe { std::ptr::copy(src as *const u8, dst as *mut u8, size) };
+        Ok(())
+    }
+
+    /// Copy `size` bytes from `src` to `dst`
+    ///
+    /// The `src` and `dst` must not overlap (overlap is UB).
+    pub fn copy_nonoverlapping(&mut self, src: usize, dst: usize, size: usize) -> Result<()> {
+        self.check_readable(src, size)?;
+        self.check_writable(dst, size)?;
+        if src < dst.saturating_add(size) && dst < src.saturating_add(size) {
+            anyhow::bail!("`copy_nonoverlapping` called with overlapping ranges, which is UB");
+        }
+        // SAFETY: both ranges lie within live, non-overlapping allocations.
+        unsafe { std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size) };
+        Ok(())
+    }
+
+    /// Bail unless `[address, address + size)` is a readable allocation.
+    fn check_readable(&self, address: usize, size: usize) -> Result<()> {
+        if self.stack.contains(address, size)
+            || self.heap.contains(address, size)
+            || self.statics.contains(address, size)
+        {
+            Ok(())
+        } else {
+            anyhow::bail!("copy source [0x{address:x}, +{size}) is not a readable allocation")
+        }
+    }
+
+    /// Bail unless `[address, address + size)` is a writable allocation.
+    ///
+    /// Statics are read-only, so they are not writable copy destinations.
+    fn check_writable(&self, address: usize, size: usize) -> Result<()> {
+        if self.stack.contains(address, size) || self.heap.contains(address, size) {
+            Ok(())
+        } else {
+            anyhow::bail!("copy destination [0x{address:x}, +{size}) is not a writable allocation")
+        }
+    }
 }
 
 /// The type of errors that can be encountered during a memory access.
@@ -311,4 +360,58 @@ unsafe trait MemorySegment {
     /// * `Ok(())` - Write was successful
     /// * `Err` - Error found when trying to satisfy the request
     fn write_addr(&self, address: usize, data: &[u8]) -> Result<(), MemoryAccessError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Return a new `ThreadMemory` with two distinct heap allocations
+    ///
+    /// Return their base addresses.
+    fn two_allocs(src_len: usize, dst_len: usize) -> (ThreadMemory, usize, usize) {
+        let mem = ThreadMemory::new();
+        let src = mem.heap_allocate(src_len, 1).unwrap();
+        let dst = mem.heap_allocate(dst_len, 1).unwrap();
+        (mem, src, dst)
+    }
+
+    /// A copy whose source range is out of bounds is rejected.
+    ///
+    /// `size` both exceeds the source allocation and would overflow the source
+    /// pointer (`src + size` wraps `usize`), so the read-range check must reject
+    /// it cleanly rather than panic or wrap.
+    #[test]
+    fn copy_source_range_out_of_bounds_is_rejected() {
+        let (mut mem, src, dst) = two_allocs(8, 64);
+        let size = usize::MAX - src + 1;
+        assert!(mem.copy(src, dst, size).is_err());
+        assert!(mem.copy_nonoverlapping(src, dst, size).is_err());
+    }
+
+    /// A copy whose destination range is out of bounds is rejected.
+    ///
+    /// The source is large enough that the read check passes, so the too-small
+    /// destination must be caught by the write-range check specifically.
+    #[test]
+    fn copy_destination_range_out_of_bounds_is_rejected() {
+        let (mut mem, src, dst) = two_allocs(64, 8);
+        assert!(mem.copy(src, dst, 16).is_err());
+        assert!(mem.copy_nonoverlapping(src, dst, 16).is_err());
+    }
+
+    #[test]
+    fn copy_nonoverlapping_rejects_overlap_but_copy_allows_it() {
+        let mut mem = ThreadMemory::new();
+        let base = mem.heap_allocate(16, 1).unwrap();
+        assert!(mem.copy_nonoverlapping(base, base + 4, 8).is_err());
+        assert!(mem.copy(base, base + 4, 8).is_ok());
+    }
+
+    #[test]
+    fn copy_within_bounds_succeeds() {
+        let (mut mem, src, dst) = two_allocs(16, 16);
+        assert!(mem.copy(src, dst, 16).is_ok());
+        assert!(mem.copy_nonoverlapping(src, dst, 16).is_ok());
+    }
 }
