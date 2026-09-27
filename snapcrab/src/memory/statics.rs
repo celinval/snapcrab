@@ -43,8 +43,10 @@ struct StaticsInner {
     allocations: Vec<AlignedBuf>,
     /// Maps AllocId index to the index in `allocations`.
     alloc_map: HashMap<usize, usize>,
-    /// Tracks which addresses belong to us for bounds checking.
-    sanitizer: MemorySanitizer,
+    /// Read-write allocations.
+    writable: MemorySanitizer,
+    /// Read-only allocations.
+    read_only: MemorySanitizer,
 }
 
 impl Statics {
@@ -104,7 +106,13 @@ impl Statics {
     /// The code segment is deliberately excluded: function memory is callable,
     /// not a valid copy source or destination.
     pub fn contains(&self, address: usize, size: usize) -> bool {
-        self.inner.borrow().sanitizer.contains(address, size)
+        let inner = self.inner.borrow();
+        inner.writable.contains(address, size) || inner.read_only.contains(address, size)
+    }
+
+    /// Whether `[address, address + size)` lies within a writable static allocation.
+    pub fn contains_writable(&self, address: usize, size: usize) -> bool {
+        self.inner.borrow().writable.contains(address, size)
     }
 
     /// Resolve a reified function address back to its `Instance`.
@@ -150,7 +158,14 @@ impl Statics {
         // SAFETY: the buffer's heap pointer remains stable after push (only the
         // `AlignedBuf` struct moves, not the allocation it owns).
         let slice = unsafe { slice::from_raw_parts(addr as *const u8, len) };
-        inner.sanitizer.register_alloc(slice);
+        // `static mut` and statics with interior mutability materialize as
+        // mutable allocations; those are the only writable static memory. The
+        // rest is read-only.
+        if alloc.mutability == Mutability::Mut {
+            inner.writable.register_alloc(slice);
+        } else {
+            inner.read_only.register_alloc(slice);
+        }
         inner.alloc_map.insert(id_idx, alloc_idx);
 
         addr
@@ -184,7 +199,7 @@ fn check_static_not_duplicated(def: StaticDef) -> anyhow::Result<()> {
 unsafe impl MemorySegment for Statics {
     fn read_addr(&self, address: usize, size: usize) -> Result<Value, MemoryAccessError> {
         let inner = self.inner.borrow();
-        if !inner.sanitizer.contains(address, size) {
+        if !inner.writable.contains(address, size) && !inner.read_only.contains(address, size) {
             return Err(MemoryAccessError::NotFound);
         }
         let ptr = address as *const u8;
@@ -194,8 +209,19 @@ unsafe impl MemorySegment for Statics {
         Ok(Value::from_bytes(slice))
     }
 
-    fn write_addr(&self, _address: usize, _data: &[u8]) -> Result<(), MemoryAccessError> {
-        Err(MemoryAccessError::OutOfBounds)
+    fn write_addr(&self, address: usize, data: &[u8]) -> Result<(), MemoryAccessError> {
+        let inner = self.inner.borrow();
+        if inner.writable.contains(address, data.len()) {
+            // SAFETY: the range is within a live, writable materialized static
+            // (a real `AlignedBuf`); interior mutability through `&self` matches
+            // how the other segments write.
+            unsafe { ptr::copy(data.as_ptr(), address as *mut u8, data.len()) };
+            Ok(())
+        } else if inner.read_only.contains(address, data.len()) {
+            Err(MemoryAccessError::ReadOnly)
+        } else {
+            Err(MemoryAccessError::NotFound)
+        }
     }
 }
 

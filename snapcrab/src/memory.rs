@@ -161,6 +161,7 @@ impl ThreadMemory {
                 )
             }
             Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+            Err(MemoryAccessError::ReadOnly) => unreachable!("reads never hit read-only memory"),
         }
 
         // Try heap
@@ -173,6 +174,7 @@ impl ThreadMemory {
                 )
             }
             Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+            Err(MemoryAccessError::ReadOnly) => unreachable!("reads never hit read-only memory"),
         }
 
         // Try statics
@@ -187,6 +189,7 @@ impl ThreadMemory {
             Err(MemoryAccessError::NotFound) => {
                 anyhow::bail!("Address 0x{:x} not found in any memory segment", address)
             }
+            Err(MemoryAccessError::ReadOnly) => unreachable!("reads never hit read-only memory"),
         }
     }
 
@@ -225,6 +228,7 @@ impl ThreadMemory {
                 )
             }
             Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+            Err(MemoryAccessError::ReadOnly) => unreachable!("the stack is always writable"),
         }
 
         // Try heap
@@ -237,11 +241,18 @@ impl ThreadMemory {
                 )
             }
             Err(MemoryAccessError::NotFound) => {} // Continue to next segment
+            Err(MemoryAccessError::ReadOnly) => unreachable!("the heap is always writable"),
         }
 
         // Try statics
         match self.statics.write_addr(address, data) {
             Ok(()) => Ok(()),
+            Err(MemoryAccessError::ReadOnly) => {
+                anyhow::bail!(
+                    "Cannot write to read-only memory at address 0x{:x}",
+                    address
+                )
+            }
             Err(MemoryAccessError::OutOfBounds) => {
                 anyhow::bail!(
                     "Static memory access out of bounds at address 0x{:x}",
@@ -295,9 +306,13 @@ impl ThreadMemory {
 
     /// Bail unless `[address, address + size)` is a writable allocation.
     ///
-    /// Statics are read-only, so they are not writable copy destinations.
+    /// Read-only statics (`const`/immutable `static`) are excluded; only
+    /// `static mut` and interior-mutable statics are writable.
     fn check_writable(&self, address: usize, size: usize) -> Result<()> {
-        if self.stack.contains(address, size) || self.heap.contains(address, size) {
+        if self.stack.contains(address, size)
+            || self.heap.contains(address, size)
+            || self.statics.contains_writable(address, size)
+        {
             Ok(())
         } else {
             anyhow::bail!("copy destination [0x{address:x}, +{size}) is not a writable allocation")
@@ -312,6 +327,9 @@ enum MemoryAccessError {
     OutOfBounds,
     /// The base address is not in this memory segment.
     NotFound,
+    /// The range is in read-only memory (a `const`/immutable `static`), so it
+    /// cannot be written.
+    ReadOnly,
 }
 
 impl std::fmt::Display for MemoryAccessError {
@@ -319,6 +337,7 @@ impl std::fmt::Display for MemoryAccessError {
         match self {
             MemoryAccessError::OutOfBounds => write!(f, "Memory access out of bounds"),
             MemoryAccessError::NotFound => write!(f, "Address not found in memory segment"),
+            MemoryAccessError::ReadOnly => write!(f, "Write to read-only memory"),
         }
     }
 }

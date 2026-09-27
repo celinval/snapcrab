@@ -12,6 +12,7 @@ mod integration_tests {
     mod heap_tests;
     mod intrinsics_tests;
     mod native_tests;
+    mod statics_tests;
     mod std_tests;
 }
 
