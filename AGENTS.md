@@ -96,11 +96,61 @@ The exception is tests specifically exercising panic handling.
 
 Older tests return values and check byte representations in the macro invocation — this predates the panic machinery support. New tests should prefer the assert-and-panic style.
 
+### Validating expected behavior
+
+Never assume what a test input *should* do — confirm it against the real
+toolchain. A test that passes because the interpreter and the test author share
+a misconception is worse than no test.
+
+**Every new test input must be run with `rustc`.** Compile it natively and run
+each test function:
+
+```bash
+# Driver: a `main` that calls the test function by name.
+rustc --edition=2024 -C debug-assertions=on -o driver driver.rs
+./driver my_test_fn; echo "exit=$?"
+```
+
+For a well-defined program, snapcrab must agree with `rustc`: the same success,
+or the same failure for the same reason.
+
+**When `rustc` and the interpreter diverge, run the input under Miri** to find
+undefined behavior we may have missed. Native `rustc` emits no runtime check for
+most UB, so it silently computes garbage and exits 0 — that tells you nothing
+about whether the program is actually UB. Miri is the oracle:
+
+```bash
+cargo +nightly miri run --quiet -- my_test_fn
+```
+
+- **Miri reports UB:** the program was never well defined, so the divergence is
+  expected. Detecting the UB and failing is *better* than rustc's silent
+  acceptance, and is the behavior we want. Cite the relevant `std` safety
+  documentation for the claim.
+- **Miri reports no UB:** treat it as an interpreter bug, unless the compiler
+  itself ICEs. Debug it, or record it in
+  [docs/src/next-steps.md](docs/src/next-steps.md) if it is out of scope.
+
+**Add the test either way.** A divergence is exposing something incoherent, so
+the test is worth keeping whichever way it is resolved — as passing coverage, or
+as an `#[ignore]`d test naming the gap.
+
+**Ask for human help if you cannot narrow down where a discrepancy comes from.**
+Report what you ruled out and the smallest input that still reproduces it. Do
+not guess at a cause, paper over it by relaxing the test, or leave it
+unmentioned.
+
+Note that the test harness compiles inputs with an older edition
+(`tests/common/mod.rs`), so check that edition too if an input is
+edition-sensitive — a divergence should never be just an edition difference.
+
 ### Adding tests
 
 1. Create or add to an input file under `tests/inputs/<category>/`.
-2. Add a `check_custom_start!` entry in the appropriate test module.
-3. Use `#[ignore]` attribute inside the macro for tests that aren't passing yet.
+2. Validate the expected behavior against `rustc`, and against Miri if it
+   diverges from the interpreter (see above).
+3. Add a `check_custom_start!` entry in the appropriate test module.
+4. Use `#[ignore]` attribute inside the macro for tests that aren't passing yet.
 
 ## Commit conventions
 
@@ -154,6 +204,10 @@ cargo fmt
 
 # Run all tests
 cargo test --quiet
+
+# Validate a test input's expected behavior against the real toolchain
+rustc --edition=2024 -C debug-assertions=on -o driver driver.rs && ./driver my_test_fn
+cargo +nightly miri run --quiet -- my_test_fn   # when rustc and snapcrab diverge
 
 # Run the interpreter (standalone, single file)
 cargo run -p snapcrab -- run input.rs
