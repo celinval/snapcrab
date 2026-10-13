@@ -132,6 +132,44 @@ pub fn eval_intrinsic(
             }
             Ok(Value::unit().clone())
         }
+        // `ptr_offset_from[_unsigned]::<T>(ptr, base)`: the element distance
+        // between two pointers, i.e. the inverse of `BinOp::Offset`. The
+        // unsigned form additionally requires `ptr >= base`.
+        "ptr_offset_from" | "ptr_offset_from_unsigned" => {
+            let elem_ty = intrinsic_type_arg(instance, 0)?;
+            let elem_size = elem_ty.size()?;
+            if elem_size == 0 {
+                bail!("`{name}` is not supported on the zero-sized type `{elem_ty}`");
+            }
+            let ptr = args[0].read_uint() as i128;
+            let base = args[1].read_uint() as i128;
+            let byte_distance = ptr - base;
+            if byte_distance % elem_size as i128 != 0 {
+                bail!(
+                    "`{name}` byte distance {byte_distance} between 0x{ptr:x} and 0x{base:x} \
+                     is not a multiple of the size of `{elem_ty}` ({elem_size}), which is UB"
+                );
+            }
+            // The two pointers must not be more than `isize::MAX` bytes apart,
+            // so the distance always fits an `isize`; converting without the
+            // check could silently wrap.
+            let distance = isize::try_from(byte_distance / elem_size as i128).map_err(|_| {
+                anyhow::anyhow!(
+                    "`{name}` byte distance {byte_distance} between 0x{ptr:x} and 0x{base:x} \
+                     overflows an `isize`, which is UB"
+                )
+            })?;
+            if name == "ptr_offset_from" {
+                Ok(Value::from_type(distance))
+            } else if distance < 0 {
+                bail!(
+                    "`{name}` called with `ptr` (0x{ptr:x}) before `base` (0x{base:x}), \
+                     giving a negative distance of {distance} `{elem_ty}` elements, which is UB"
+                );
+            } else {
+                Ok(Value::from_type(distance as usize))
+            }
+        }
         // Saturating arithmetic clamps to the type's bounds instead of
         // wrapping. The generic type is the intrinsic's first type argument.
         "saturating_add" => saturating_add(intrinsic_type_arg(instance, 0)?, &args[0], &args[1]),

@@ -249,6 +249,70 @@ where
     Ok((Value::from_type(wrapped), overflow))
 }
 
+/// Resize an integer value to `target_size` bytes.
+///
+/// A wider target is sign-extended when `is_signed`, and zero-extended
+/// otherwise; a narrower one is truncated. This is the `as` conversion rule,
+/// shared by integer casts and the pointer/integer casts.
+fn resize_int(value: Value, target_size: usize, is_signed: bool) -> Value {
+    let source_size = value.len();
+    if target_size == source_size {
+        value
+    } else if target_size < source_size {
+        value.as_bytes()[..target_size].into()
+    } else if is_signed {
+        value.sign_extend(target_size)
+    } else {
+        Value::from_val_with_padding(&value, target_size)
+    }
+}
+
+/// Evaluate `BinOp::Offset`, the pointer arithmetic behind `ptr::offset`/`add`.
+///
+/// The right operand is an element count (signed for `offset`, unsigned for
+/// `add`), so the byte offset is `count * size_of::<T>()`. The resulting address
+/// is not bounds-checked: a one-past-the-end pointer is legal and slice
+/// iterators rely on it, while any actual access validates its own range.
+fn eval_offset(l: &Value, r: &Value, lhs_type: &RigidTy, rhs_type: &RigidTy) -> Result<Value> {
+    let pointee = match lhs_type {
+        RigidTy::RawPtr(pointee, _) | RigidTy::Ref(_, pointee, _) => *pointee,
+        _ => bail!(
+            "`Offset` expects a pointer, got `{}`",
+            Ty::from_rigid_kind(lhs_type.clone())
+        ),
+    };
+    // `ptr::offset` and friends require a sized pointee, so the pointer is
+    // thin. Guarding this is cheap insurance: an unsized pointee reports size
+    // 0, which would silently compute a zero offset and narrow the pointer.
+    if pointee.is_unsized()? {
+        bail!("`Offset` requires a sized pointee, got `{pointee}`");
+    }
+    let count = match rhs_type {
+        RigidTy::Int(_) => r.read_int(),
+        RigidTy::Uint(_) => r.read_uint() as i128,
+        _ => bail!(
+            "`Offset` expects an integer count, got `{}`",
+            Ty::from_rigid_kind(rhs_type.clone())
+        ),
+    };
+
+    // The byte offset must fit in an `isize`; exceeding it is undefined
+    // behavior, so reject it rather than wrap.
+    let elem_size = pointee.size()?;
+    let byte_offset = count
+        .checked_mul(elem_size as i128)
+        .and_then(|offset| isize::try_from(offset).ok())
+        .with_context(|| {
+            format!(
+                "`offset` of {count} elements of `{pointee}` ({elem_size} bytes each) \
+                 overflows an `isize` byte offset, which is UB"
+            )
+        })?;
+
+    let base = l.clone().to_data_addr()?.read_uint() as usize;
+    Ok(Value::from_type(base.wrapping_add_signed(byte_offset)))
+}
+
 /// Evaluates a comparison on wide pointers (both halves must match).
 fn eval_wide_ptr_binop(op: BinOp, l: &Value, r: &Value, operand_type: &RigidTy) -> Result<Value> {
     let pointee = match operand_type {
@@ -335,6 +399,7 @@ fn eval_bool_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value> {
     let result = match op {
         BinOp::BitAnd => left & right,
         BinOp::BitOr => left | right,
+        BinOp::BitXor => left ^ right,
         BinOp::Eq => left == right,
         BinOp::Ne => left != right,
         _ => bail!("Unsupported boolean binary operation: {:?}", op),
@@ -383,6 +448,13 @@ impl<'a> FnInterpreter<'a> {
                 let lhs_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
                 let rhs_type = right.ty(self.locals())?.kind().rigid().unwrap().clone();
                 eval_shift(op, &left_val, &right_val, &lhs_type, &rhs_type)
+            }
+            Rvalue::BinaryOp(BinOp::Offset, left, right) => {
+                let left_val = self.evaluate_operand(left)?;
+                let right_val = self.evaluate_operand(right)?;
+                let lhs_type = left.ty(self.locals())?.kind().rigid().unwrap().clone();
+                let rhs_type = right.ty(self.locals())?.kind().rigid().unwrap().clone();
+                eval_offset(&left_val, &right_val, &lhs_type, &rhs_type)
             }
             Rvalue::BinaryOp(op, left, right) => {
                 let left_val = self.evaluate_operand(left)?;
@@ -523,25 +595,8 @@ impl<'a> FnInterpreter<'a> {
     ) -> Result<Value> {
         match cast_kind {
             CastKind::IntToInt => {
-                let target_size = target_ty.size()?;
-                let source_size = source_ty.size()?;
-
-                if target_size == source_size {
-                    Ok(value)
-                } else if target_size > source_size {
-                    // Check if source is signed for sign extension
-                    let is_signed = matches!(source_ty.kind().rigid(), Some(RigidTy::Int(_)));
-
-                    if is_signed {
-                        Ok(value.sign_extend(target_size))
-                    } else {
-                        // Zero extend for unsigned
-                        Ok(Value::from_val_with_padding(&value, target_size))
-                    }
-                } else {
-                    // Truncate to target size
-                    Ok(value.as_bytes()[..target_size].into())
-                }
+                let is_signed = matches!(source_ty.kind().rigid(), Some(RigidTy::Int(_)));
+                Ok(resize_int(value, target_ty.size()?, is_signed))
             }
             CastKind::PtrToPtr => {
                 if target_ty.is_wide_ptr() {
@@ -551,6 +606,19 @@ impl<'a> FnInterpreter<'a> {
                 } else {
                     Ok(value)
                 }
+            }
+            // `ptr as int`. A pointer value *is* its address in our memory
+            // model and we track no provenance, so the address passes straight
+            // through — but the target may be any integer width, so resize it
+            // as an unsigned value just like an `IntToInt` cast would.
+            CastKind::PointerExposeAddress => {
+                Ok(resize_int(value.to_data_addr()?, target_ty.size()?, false))
+            }
+            // `int as ptr`. The source may be any integer type, so resize it to
+            // a pointer, sign-extending a signed source as rustc does.
+            CastKind::PointerWithExposedProvenance => {
+                let is_signed = matches!(source_ty.kind().rigid(), Some(RigidTy::Int(_)));
+                Ok(resize_int(value, pointer_width(), is_signed))
             }
             CastKind::PointerCoercion(PointerCoercion::Unsize) => {
                 perform_unsized_coercion(value, source_ty, target_ty, self.memory)

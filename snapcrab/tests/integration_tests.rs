@@ -127,6 +127,12 @@ check_custom_start!(
 );
 
 check_custom_start!(
+    test_bool_bit_ops,
+    input = "bool_function.rs",
+    start_fn = "bool_bit_ops",
+);
+
+check_custom_start!(
     test_mut_reference,
     input = "reference_test.rs",
     start_fn = "test_mut_ref",
@@ -210,7 +216,7 @@ check_custom_start!(
     test_read_misaligned_ptr,
     input = "raw_pointer_test.rs",
     start_fn = "read_misaligned_ptr",
-    result = TestResult::ErrorRegex(r".*Unsupported.*Offset.*".to_string())
+    result = TestResult::ErrorRegex(r".*misaligned pointer dereference.*".to_string())
 );
 
 check_custom_start!(

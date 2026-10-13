@@ -231,3 +231,87 @@ check_custom_start!(
     input = "intrinsics/mem_copy.rs",
     start_fn = "copy_overlapping",
 );
+
+// --- Raw pointer arithmetic ---
+
+check_custom_start!(
+    test_ptr_add,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_add",
+);
+
+check_custom_start!(
+    test_ptr_add_scales_by_size,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_add_scales_by_size",
+);
+
+check_custom_start!(
+    test_ptr_negative_offset,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_negative_offset",
+);
+
+check_custom_start!(
+    test_ptr_sub,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_sub",
+);
+
+check_custom_start!(
+    test_ptr_one_past_end,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_one_past_end",
+);
+
+check_custom_start!(
+    test_ptr_offset_from,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_offset_from",
+);
+
+check_custom_start!(
+    test_ptr_offset_from_unsigned,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "ptr_offset_from_unsigned",
+);
+
+check_custom_start!(
+    test_ptr_addr_roundtrip,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "addr_roundtrip",
+);
+
+check_custom_start!(
+    test_ptr_addr_truncates_to_narrower_int,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "addr_truncates_to_narrower_int",
+);
+
+check_custom_start!(
+    test_ptr_offset_from_not_multiple,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "offset_from_not_multiple",
+    result = TestResult::ErrorRegex(r".*not a multiple of the size of `u32`.*".to_string())
+);
+
+check_custom_start!(
+    test_ptr_offset_overflows_isize,
+    input = "intrinsics/ptr_arith.rs",
+    start_fn = "offset_overflows_isize",
+    result = TestResult::ErrorRegex(r".*overflows an `isize`.*".to_string())
+);
+
+check_custom_start!(
+    test_ptr_offset_from_zst,
+    input = "intrinsics/ptr_offset_from_ub.rs",
+    start_fn = "offset_from_zst",
+    result = TestResult::ErrorRegex(r".*not supported on the zero-sized type `\(\)`.*".to_string())
+);
+
+check_custom_start!(
+    test_ptr_offset_from_unsigned_backwards,
+    input = "intrinsics/ptr_offset_from_ub.rs",
+    start_fn = "offset_from_unsigned_backwards",
+    result = TestResult::ErrorRegex(r".*before `base`.*negative distance.*".to_string())
+);
