@@ -7,7 +7,7 @@ use std::mem;
 
 use crate::interpreter::check::validate_value;
 use crate::memory::{ThreadMemory, pointer_width};
-use crate::ty::MonoType;
+use crate::ty::{self, MonoType};
 use crate::value::Value;
 use anyhow::{Context, Result, bail};
 use num_traits::{SaturatingAdd, SaturatingSub};
@@ -377,7 +377,7 @@ fn unsized_tail_size_and_align(
         .with_context(|| format!("unsized type `{ty}` has no fields"))?
         .bytes();
 
-    let (tail_size, tail_align) = size_and_align_of_val(unsized_tail_ty(ty)?, ptr, memory)?;
+    let (tail_size, tail_align) = size_and_align_of_val(ty::unsized_tail_ty(ty)?, ptr, memory)?;
     let align = (shape.abi_align as usize).max(tail_align);
 
     // Round the tail's end up to the aggregate's alignment, then enforce the
@@ -389,29 +389,6 @@ fn unsized_tail_size_and_align(
         .filter(|&size| size <= MAX_OBJECT_SIZE)
         .with_context(|| format!("size of `{ty}` exceeds the maximum object size"))?;
     Ok((end, align))
-}
-
-/// The type of an aggregate's last (unsized) field.
-fn unsized_tail_ty(ty: Ty) -> Result<Ty> {
-    match ty.kind() {
-        TyKind::RigidTy(RigidTy::Tuple(fields)) => fields
-            .last()
-            .copied()
-            .with_context(|| format!("tuple `{ty}` has no fields")),
-        TyKind::RigidTy(RigidTy::Adt(def, args)) => {
-            let variant = def
-                .variants_iter()
-                .next()
-                .with_context(|| format!("`{ty}` has no variant"))?;
-            let field = variant
-                .fields()
-                .last()
-                .cloned()
-                .with_context(|| format!("`{ty}` has no fields"))?;
-            Ok(field.ty_with_args(&args))
-        }
-        _ => bail!("cannot determine the unsized tail of `{ty}`"),
-    }
 }
 
 /// A variant is uninhabited when any of its fields is uninhabited.

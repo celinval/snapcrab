@@ -1,19 +1,18 @@
 use crate::memory::{ThreadMemory, pointer_width};
-use crate::ty::MonoType;
+use crate::ty::{self, MonoType};
 use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, anyhow, bail};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, WrappingAdd,
     WrappingMul, WrappingSub, Zero,
 };
-use rustc_public::CrateDefType;
 use rustc_public::abi::{FieldsShape, Scalar, TagEncoding, VariantsShape};
 use rustc_public::mir::alloc::GlobalAlloc;
 use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
 use rustc_public::target::MachineInfo;
 use rustc_public::ty::{
-    AdtDef, ClosureKind, IntTy, RigidTy, Ty, TyKind, TypeAndMut, UintTy, VariantIdx, VtblEntry,
+    AdtDef, ClosureKind, IntTy, RigidTy, Ty, TyKind, UintTy, VariantIdx, VtblEntry,
 };
 use rustc_public_bridge::IndexedVal;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -668,19 +667,21 @@ fn perform_unsized_coercion(
     dst_ptr_ty: Ty,
     memory: &ThreadMemory,
 ) -> Result<Value> {
-    // Only built-in pointers/references unsize here. Smart pointers such as
-    // `Rc`/`Arc`/`Pin` coerce through their own `CoerceUnsized` impl (the data
-    // pointer lives in a field), which is not yet supported.
-    let src_pointee = src_ptr_ty
-        .kind()
-        .builtin_deref(true)
-        .map(|TypeAndMut { ty, .. }| ty)
-        .with_context(|| format!("unsized coercion of `{src_ptr_ty}` is not yet supported"))?;
-    let dst_pointee = dst_ptr_ty
-        .kind()
-        .builtin_deref(true)
-        .map(|TypeAndMut { ty, .. }| ty)
-        .with_context(|| format!("unsized coercion to `{dst_ptr_ty}` is not yet supported"))?;
+    // A pattern type, such as the `*const T is !null` that `NonNull` holds,
+    // shares its base type's layout: the pattern only restricts which values
+    // are valid, so coerce the base.
+    let src_ptr_ty = ty::peel_pattern(src_ptr_ty);
+    let dst_ptr_ty = ty::peel_pattern(dst_ptr_ty);
+
+    // Smart pointers such as `Rc`/`Arc`/`Pin` are not built-in pointers: they
+    // coerce through their own `CoerceUnsized` impl, which unsizes a pointer
+    // held in one of their fields.
+    let (Some(src_pointee), Some(dst_pointee)) = (
+        ty::try_pointee_ty(src_ptr_ty),
+        ty::try_pointee_ty(dst_ptr_ty),
+    ) else {
+        return coerce_unsized_struct(value, src_ptr_ty, dst_ptr_ty, memory);
+    };
     // `kind()` translates from rustc's internal representation, so resolve each
     // pointee's kind once and reuse it.
     let src_kind = src_pointee.kind();
@@ -771,8 +772,8 @@ fn unsize_metadata(
         memory.resolve_alloc(vtable_id)
     } else if dst_kind.is_struct() {
         // The metadata is determined by the structs' unsized tail fields.
-        let src_tail = last_field_ty(src_kind)?;
-        let dst_tail = last_field_ty(dst_kind)?;
+        let src_tail = ty::unsized_tail_ty(*src_pointee)?;
+        let dst_tail = ty::unsized_tail_ty(*dst_pointee)?;
         unsize_metadata(
             &src_tail,
             &src_tail.kind(),
@@ -785,17 +786,68 @@ fn unsize_metadata(
     }
 }
 
-/// The type of a struct's last field (its potentially-unsized tail).
-fn last_field_ty(kind: &TyKind) -> Result<Ty> {
-    let TyKind::RigidTy(RigidTy::Adt(def, args)) = kind else {
-        bail!("expected a struct, found `{kind:?}`");
-    };
-    let field = def
-        .variants()
-        .first()
-        .and_then(|variant| variant.fields().last().cloned())
-        .context("struct has no fields")?;
-    Ok(field.ty_with_args(args))
+/// Coerce a smart pointer, such as `Rc<T>` to `Rc<dyn Trait>`.
+///
+/// Rust requires a `CoerceUnsized` impl to change the type of exactly one
+/// field — the one holding the pointer being unsized — so rebuild the
+/// destination by copying every field that keeps its type and recursing into
+/// the one that does not. The two layouts differ, because the coerced field
+/// grows from a thin to a wide pointer, so each side's offsets come from its
+/// own layout.
+fn coerce_unsized_struct(
+    value: Value,
+    src_ty: Ty,
+    dst_ty: Ty,
+    memory: &ThreadMemory,
+) -> Result<Value> {
+    let src_fields = ty::struct_fields(src_ty)?;
+    let dst_fields = ty::struct_fields(dst_ty)?;
+    if src_fields.len() != dst_fields.len() {
+        bail!(
+            "cannot coerce `{src_ty}` to `{dst_ty}`: they have {} and {} fields",
+            src_fields.len(),
+            dst_fields.len()
+        );
+    }
+
+    let mut bytes = vec![0u8; dst_ty.size()?];
+    let mut coerced_field = None;
+    for (index, (src, dst)) in src_fields.iter().zip(&dst_fields).enumerate() {
+        // A zero-sized field carries nothing, even when its type changes (e.g.
+        // the `PhantomData<T>` that `Rc` holds alongside its pointer).
+        if dst.size == 0 {
+            continue;
+        }
+        let src_bytes = value
+            .as_bytes()
+            .get(src.offset..src.offset + src.size)
+            .with_context(|| format!("field {index} lies outside the value of `{src_ty}`"))?;
+        let field = if src.ty == dst.ty {
+            Value::from_bytes(src_bytes)
+        } else {
+            if coerced_field.is_some() {
+                bail!(
+                    "cannot coerce `{src_ty}` to `{dst_ty}`: more than one field changes type, \
+                     so the field to unsize is ambiguous"
+                );
+            }
+            coerced_field = Some(index);
+            perform_unsized_coercion(Value::from_bytes(src_bytes), src.ty, dst.ty, memory)?
+        };
+        if field.len() != dst.size {
+            bail!(
+                "coercing field {index} of `{src_ty}` produced {} bytes, but `{}` occupies {}",
+                field.len(),
+                dst.ty,
+                dst.size
+            );
+        }
+        bytes[dst.offset..dst.offset + dst.size].copy_from_slice(field.as_bytes());
+    }
+    coerced_field.with_context(|| {
+        format!("cannot coerce `{src_ty}` to `{dst_ty}`: no field changes type")
+    })?;
+    Ok(Value::from_bytes(&bytes))
 }
 
 fn tag_scalar_size(tag: &Scalar, target: &MachineInfo) -> usize {

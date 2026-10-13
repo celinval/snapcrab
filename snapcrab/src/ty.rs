@@ -1,7 +1,7 @@
 //! Module with type extensions.
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rustc_public::CrateDefType;
-use rustc_public::abi::{Primitive, Scalar, ValueAbi};
+use rustc_public::abi::{FieldsShape, Primitive, Scalar, ValueAbi};
 use rustc_public::mir::Mutability;
 use rustc_public::ty::{RigidTy, Ty, TyKind};
 
@@ -54,10 +54,86 @@ impl MonoType for Ty {
 
 /// The pointee type of a pointer or reference type.
 pub fn pointee_ty(ty: Ty) -> Result<Ty> {
-    ty.kind()
-        .builtin_deref(true)
-        .map(|t| t.ty)
-        .with_context(|| format!("expected a pointer type, got `{ty}`"))
+    try_pointee_ty(ty).with_context(|| format!("expected a pointer type, got `{ty}`"))
+}
+
+/// The pointee type of a built-in pointer or reference, if `ty` is one.
+///
+/// Smart pointers such as `Rc` are plain structs, so they yield `None`.
+pub fn try_pointee_ty(ty: Ty) -> Option<Ty> {
+    ty.kind().builtin_deref(true).map(|target| target.ty)
+}
+
+/// Strip any pattern type, yielding the base type it constrains.
+///
+/// A pattern type, such as the `*const T is !null` that `NonNull` holds, shares
+/// its base type's layout: the pattern only restricts which values are valid.
+pub fn peel_pattern(mut ty: Ty) -> Ty {
+    while let TyKind::RigidTy(RigidTy::Pat(base, _)) = ty.kind() {
+        ty = base;
+    }
+    ty
+}
+
+/// The type of an aggregate's last field, its potentially-unsized tail.
+pub fn unsized_tail_ty(ty: Ty) -> Result<Ty> {
+    match ty.kind() {
+        TyKind::RigidTy(RigidTy::Tuple(fields)) => fields
+            .last()
+            .copied()
+            .with_context(|| format!("tuple `{ty}` has no fields")),
+        TyKind::RigidTy(RigidTy::Adt(def, args)) => {
+            let variant = def
+                .variants_iter()
+                .next()
+                .with_context(|| format!("`{ty}` has no variant"))?;
+            let field = variant
+                .fields()
+                .last()
+                .cloned()
+                .with_context(|| format!("`{ty}` has no fields"))?;
+            Ok(field.ty_with_args(&args))
+        }
+        _ => bail!("cannot determine the unsized tail of `{ty}`"),
+    }
+}
+
+/// A struct field's type and its position in the struct's layout.
+pub struct FieldLayout {
+    pub ty: Ty,
+    pub offset: usize,
+    pub size: usize,
+}
+
+/// The types, offsets and sizes of a struct's fields, in declaration order.
+pub fn struct_fields(ty: Ty) -> Result<Vec<FieldLayout>> {
+    let TyKind::RigidTy(RigidTy::Adt(def, args)) = ty.kind() else {
+        bail!("expected a struct, found `{ty}`");
+    };
+    if !ty.kind().is_struct() {
+        bail!("expected a struct, found `{ty}`");
+    }
+    let variant = def
+        .variants()
+        .into_iter()
+        .next()
+        .with_context(|| format!("`{ty}` has no variant"))?;
+    let FieldsShape::Arbitrary { offsets } = ty.layout()?.shape().fields else {
+        bail!("`{ty}` has no field layout");
+    };
+    variant
+        .fields()
+        .iter()
+        .zip(offsets)
+        .map(|(field, offset)| {
+            let field_ty = field.ty_with_args(&args);
+            Ok(FieldLayout {
+                ty: field_ty,
+                offset: offset.bytes(),
+                size: field_ty.size()?,
+            })
+        })
+        .collect()
 }
 
 /// Check if a type contains a mutable pointer (`&mut T` or `*mut T`).
@@ -165,8 +241,6 @@ fn has_ptr_to_padded_inner(ty: Ty, mutable_only: bool) -> bool {
 /// shape: arrays have padding if stride > element size; structs are checked
 /// by comparing offsets against total size.
 pub fn has_padding(ty: Ty) -> bool {
-    use rustc_public::abi::FieldsShape;
-
     let Ok(layout) = ty.layout() else {
         return false;
     };

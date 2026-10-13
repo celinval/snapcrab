@@ -13,6 +13,7 @@ mod integration_tests {
     mod intrinsics_tests;
     mod native_tests;
     mod slice_tests;
+    mod smart_ptr_tests;
     mod statics_tests;
     mod std_tests;
     mod vec_tests;

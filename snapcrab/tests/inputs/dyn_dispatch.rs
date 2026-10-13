@@ -173,8 +173,8 @@ impl RcRecv for RcHeld {
     }
 }
 
-/// A `self: Rc<Self>` receiver. Coercing `Rc<T> -> Rc<dyn _>` goes through
-/// `Rc`'s `CoerceUnsized`, which is not yet supported.
+/// A `self: Rc<Self>` receiver, so the call coerces `Rc<T> -> Rc<dyn _>`
+/// through `Rc`'s `CoerceUnsized` impl.
 pub fn recv_rc_self() {
     let d: Rc<dyn RcRecv> = Rc::new(RcHeld(42));
     assert!(d.value() == 42);
@@ -190,7 +190,9 @@ impl ArcRecv for ArcHeld {
     }
 }
 
-/// A `self: Arc<Self>` receiver; `Arc<T> -> Arc<dyn _>` coercion, unsupported.
+/// A `self: Arc<Self>` receiver. The `Arc<T> -> Arc<dyn _>` coercion works,
+/// but `Arc` keeps its refcount in an atomic, so dropping it needs the atomic
+/// intrinsics that are not implemented yet.
 pub fn recv_arc_self() {
     let d: Arc<dyn ArcRecv> = Arc::new(ArcHeld(42));
     assert!(d.value() == 42);
@@ -236,6 +238,20 @@ impl Drop for TailImpl<'_> {
 struct WithTail<X: ?Sized> {
     header: u64,
     tail: X,
+}
+
+/// Coercing a plain reference to an ADT with a trait-object tail
+/// (`&WithTail<T> -> &WithTail<dyn Tail>`). The metadata comes from the tail
+/// field, and the sized header stays readable through the wide pointer.
+pub fn ref_adt_dyn_tail() {
+    let log = Cell::new(0);
+    let sized = WithTail {
+        header: 7,
+        tail: TailImpl { log: &log, v: 42 },
+    };
+    let unsized_ref: &WithTail<dyn Tail> = &sized;
+    assert!(unsized_ref.header == 7);
+    assert!(unsized_ref.tail.v() == 42);
 }
 
 /// Dropping an unsized ADT whose tail is a trait object runs the tail's

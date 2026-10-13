@@ -53,31 +53,33 @@ check_custom_start!(
 );
 
 // Coercing a smart pointer to a trait object (`Rc<T>`/`Arc<T>`/`Pin<&mut T>`
-// -> `dyn`) goes through the pointer's own `CoerceUnsized` impl, which is not
-// yet supported. These document the current limitation via a clean error.
+// -> `dyn`) goes through the pointer's own `CoerceUnsized` impl.
 
 check_custom_start!(
     test_dyn_recv_rc_self,
     input = "dyn_dispatch.rs",
     start_fn = "recv_rc_self",
-    result =
-        TestResult::ErrorRegex(r".*unsized coercion of .*Rc.* is not yet supported.*".to_string()),
 );
 
+// The coercion itself works; `Arc` then drops its atomic refcount, which needs
+// the atomic intrinsics.
 check_custom_start!(
     test_dyn_recv_arc_self,
     input = "dyn_dispatch.rs",
     start_fn = "recv_arc_self",
-    result =
-        TestResult::ErrorRegex(r".*unsized coercion of .*Arc.* is not yet supported.*".to_string()),
+    result = TestResult::ErrorRegex(r".*Unimplemented intrinsic `atomic_[a-z]+`.*".to_string()),
 );
 
 check_custom_start!(
     test_dyn_recv_pin_self,
     input = "dyn_dispatch.rs",
     start_fn = "recv_pin_self",
-    result =
-        TestResult::ErrorRegex(r".*unsized coercion of .*Pin.* is not yet supported.*".to_string()),
+);
+
+check_custom_start!(
+    test_dyn_ref_adt_dyn_tail,
+    input = "dyn_dispatch.rs",
+    start_fn = "ref_adt_dyn_tail",
 );
 
 check_custom_start!(
