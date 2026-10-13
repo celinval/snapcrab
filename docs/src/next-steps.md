@@ -16,7 +16,12 @@ Roughly in priority order (top first):
 - **Smart-pointer unsizing coercion.** `Rc<T>`/`Arc<T>`/`Pin<&mut T> -> dyn`
   goes through the pointer's own `CoerceUnsized` impl (the data pointer lives
   in a field), which the coercion path does not yet handle.
-- **`Vec` and other collections.** Needs slice-iterator support (`ptr::offset`).
+- **Calling a `fn` pointer through the `Fn` traits.** The `FnOnce`/`FnMut`
+  impls for `fn` pointers are shims without bodies, so passing a function
+  (rather than a closure) where a closure is expected fails with an argument
+  count mismatch — e.g. `iter().max()`, which calls `Ord::cmp` through one.
+- **Other collections** (`String` growth beyond the basics, maps, sets).
+  `Vec` works; the rest are untested.
 - **Crate loading.**
 - **`#[track_caller]` support (blocked on rustc 1.99).** Report the caller
   `Location` for `#[track_caller]` functions and the panic machinery
