@@ -19,7 +19,7 @@ use std::ptr::NonNull;
 /// the lifetime of the value. Zero-sized buffers perform no allocation and use
 /// an aligned dangling pointer.
 #[derive(Debug)]
-pub(super) struct AlignedBuf {
+pub(crate) struct AlignedBuf {
     ptr: NonNull<u8>,
     layout: Layout,
 }
@@ -31,7 +31,7 @@ impl AlignedBuf {
     /// non-zero power of two, or the size rounded up to `align` overflowing
     /// `isize`). These values may originate from the interpreted program (heap
     /// allocation), so an invalid request is an error rather than a bug.
-    pub(super) fn zeroed(size: usize, align: usize) -> Result<Self> {
+    pub(crate) fn zeroed(size: usize, align: usize) -> Result<Self> {
         let layout = Layout::from_size_align(size, align)
             .map_err(|e| anyhow!("invalid layout (size {size}, align {align}): {e}"))?;
         let ptr = if size == 0 {
@@ -47,7 +47,7 @@ impl AlignedBuf {
     }
 
     /// The buffer's base address as a const pointer.
-    pub(super) fn as_ptr(&self) -> *const u8 {
+    pub(crate) fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
     }
 
@@ -56,19 +56,19 @@ impl AlignedBuf {
     /// Takes `&self` because the interpreter writes to buffers through raw
     /// addresses rather than through this handle; the sanitizer, not the borrow
     /// checker, is what keeps those writes in bounds.
-    pub(super) fn as_mut_ptr(&self) -> *mut u8 {
+    pub(crate) fn as_mut_ptr(&self) -> *mut u8 {
         self.ptr.as_ptr()
     }
 
     /// The buffer's contents as a byte slice spanning its full layout.
-    pub(super) fn as_bytes(&self) -> &[u8] {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
         // SAFETY: `ptr` is non-null, initialized and valid for `layout.size()` bytes.
         // Alignment of `[u8]` is 1.
         unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.layout.size()) }
     }
 
     /// Retrieve the memory layout of the buffer.
-    pub(super) fn layout(&self) -> Layout {
+    pub(crate) fn layout(&self) -> Layout {
         self.layout
     }
 }

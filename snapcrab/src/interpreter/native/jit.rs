@@ -14,6 +14,7 @@
 //! NOTE: This module handles native calls only. Function pointer support
 //! (callbacks from native into the interpreter) will be added later.
 
+use crate::memory::aligned::AlignedBuf;
 use crate::value::Value;
 use anyhow::{Result, bail};
 use cranelift::prelude::*;
@@ -129,7 +130,7 @@ impl JitEngine {
         let ret_size = fn_abi.ret.ty.layout()?.shape().size.bytes();
 
         // Build the argument buffer.
-        let (args_buf, arg_layout) = inner.build_args_buffer(fn_abi, args)?;
+        let (args_buf, arg_layout, _indirect_args) = inner.build_args_buffer(fn_abi, args)?;
         trace!(
             "  args_buf: {} bytes, {} entries",
             args_buf.len(),
@@ -154,22 +155,38 @@ impl JitEngine {
         // Release the lock before calling the trampoline (it might re-enter).
         drop(inner);
 
-        let mut ret_buf = vec![MaybeUninit::<u8>::zeroed(); ret_size];
+        // The callee may write the return value through this pointer using the
+        // type's alignment (an indirect return is a hidden `sret` pointer), so
+        // the buffer honours it rather than relying on a `Vec`'s byte alignment.
+        //
+        // TODO: zero the padding bytes of an indirect return *after* the call.
+        // Pre-zeroing only covers bytes the callee leaves untouched; writing
+        // the value through `sret` can copy uninitialized padding from the
+        // callee's own frame over them. `check_call_safety` currently rejects
+        // an indirect return whose type has padding, so supporting those means
+        // clearing the padding here instead.
+        let ret_align = fn_abi.ret.layout.shape().abi_align as usize;
+        let ret_buf = AlignedBuf::zeroed(ret_size, ret_align.max(1))?;
         // SAFETY: This is only sound if the native function does not leave
         // memory accessible to the interpreter in an uninitialized state.
         // For example, if the function receives a pointer and writes a struct
         // with padding bytes into the pointee, those padding bytes become
         // uninitialized from the interpreter's perspective. We currently only
         // sanitize the return buffer (pre-zeroed above).
-        unsafe { trampoline(fn_ptr, args_buf.as_ptr(), ret_buf.as_mut_ptr()) };
+        unsafe {
+            trampoline(
+                fn_ptr,
+                args_buf.as_ptr(),
+                ret_buf.as_mut_ptr().cast::<MaybeUninit<u8>>(),
+            )
+        };
 
         if ret_size == 0 {
             Ok(Value::unit().clone())
         } else {
             // SAFETY: The trampoline wrote the return value for each scalar types.
             // The buffer was pre-zeroed so padding bytes are defined.
-            let bytes: Vec<u8> = ret_buf.iter().map(|b| unsafe { b.assume_init() }).collect();
-            Ok(Value::from_bytes(&bytes))
+            Ok(Value::from_bytes(&ret_buf[..]))
         }
     }
 }
@@ -224,8 +241,11 @@ impl JitEngineInner {
         &self,
         fn_abi: &FnAbi,
         args: &[Value],
-    ) -> Result<(Vec<u8>, Vec<ArgEntry>)> {
+    ) -> Result<(AlignedBuf, Vec<ArgEntry>, Vec<AlignedBuf>)> {
         let mut ab = ArgsBuffer::new();
+        // Aligned copies of arguments passed by hidden pointer. They must stay
+        // alive until the call returns, so hand them back to the caller.
+        let mut indirect_args = Vec::new();
 
         for (arg_abi, arg_val) in fn_abi.args.iter().zip(args.iter()) {
             match &arg_abi.mode {
@@ -280,13 +300,25 @@ impl JitEngineInner {
                              implemented for this target"
                         );
                     }
-                    ab.push_struct(arg_val.as_bytes());
+                    ab.push_struct(
+                        arg_val.as_bytes(),
+                        arg_abi.layout.shape().abi_align as usize,
+                    );
                 }
                 PassMode::Indirect {
                     on_stack: false, ..
                 } => {
-                    let ptr = arg_val.as_bytes().as_ptr() as u64;
+                    // The callee reads the argument through this pointer using
+                    // the type's alignment, so it cannot point at the `Value`'s
+                    // own storage, which is only byte-aligned. Copy into an
+                    // aligned buffer that outlives the call.
+                    let shape = arg_abi.layout.shape();
+                    let mut copy =
+                        AlignedBuf::zeroed(shape.size.bytes(), shape.abi_align as usize)?;
+                    copy[..].copy_from_slice(arg_val.as_bytes());
+                    let ptr = copy.as_ptr() as u64;
                     ab.push(self.pointer_ty, &ptr.to_le_bytes());
+                    indirect_args.push(copy);
                 }
                 PassMode::Cast { .. } => {
                     bail!("PassMode::Cast is not supported");
@@ -294,7 +326,8 @@ impl JitEngineInner {
             }
         }
 
-        Ok((ab.buf, ab.layout))
+        let layout = std::mem::take(&mut ab.layout);
+        Ok((ab.finish()?, layout, indirect_args))
     }
 
     /// Compile a trampoline for the given argument layout and return info.
@@ -497,6 +530,9 @@ enum RetMode {
 struct ArgsBuffer {
     buf: Vec<u8>,
     layout: Vec<ArgEntry>,
+    /// The strongest alignment any entry needs, so the finished buffer can be
+    /// allocated such that every entry's offset is also aligned absolutely.
+    max_align: usize,
 }
 
 impl ArgsBuffer {
@@ -504,6 +540,7 @@ impl ArgsBuffer {
         Self {
             buf: Vec::new(),
             layout: Vec::new(),
+            max_align: 1,
         }
     }
 
@@ -522,19 +559,32 @@ impl ArgsBuffer {
     }
 
     /// Append a struct's raw bytes for on-stack (byval) passing.
-    fn push_struct(&mut self, bytes: &[u8]) {
-        while !self.buf.len().is_multiple_of(8) {
+    ///
+    /// The struct is read from the buffer with its own alignment, so its offset
+    /// honours `align` rather than a fixed word size.
+    fn push_struct(&mut self, bytes: &[u8], align: usize) {
+        let align = align.max(8);
+        self.max_align = self.max_align.max(align);
+        while !self.buf.len().is_multiple_of(align) {
             self.buf.push(0);
         }
         let offset = self.buf.len();
         let size = bytes.len();
         self.buf.extend_from_slice(bytes);
-        while !self.buf.len().is_multiple_of(8) {
+        while !self.buf.len().is_multiple_of(align) {
             self.buf.push(0);
         }
         self.layout.push(ArgEntry::Struct {
             offset,
             size: size as u32,
         });
+    }
+
+    /// Copy the arguments into a buffer whose base honours `max_align`, so that
+    /// each entry's offset is aligned in absolute terms too.
+    fn finish(self) -> Result<AlignedBuf> {
+        let mut buf = AlignedBuf::zeroed(self.buf.len(), self.max_align)?;
+        buf[..].copy_from_slice(&self.buf);
+        Ok(buf)
     }
 }
