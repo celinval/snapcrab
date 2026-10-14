@@ -25,6 +25,13 @@ impl Shape for Square {
     }
 }
 
+/// A zero-sized implementor, so a coerced pointer addresses no bytes.
+impl Shape for () {
+    fn area(&self) -> u32 {
+        7
+    }
+}
+
 /// A minimal smart pointer: the pointer being unsized, plus two sized fields
 /// that the coercion must preserve.
 struct Holder<T: ?Sized> {
@@ -49,6 +56,27 @@ pub fn user_ptr_to_dyn() {
     assert!(coerced.hi == 0xDEAD_BEEF);
     let shape: &dyn Shape = unsafe { &*coerced.ptr };
     assert!(shape.area() == 49);
+}
+
+/// `Holder<()> -> Holder<dyn Trait>`: the pointee is zero-sized, so the data
+/// pointer addresses nothing, but a vtable is still attached and dispatched
+/// through.
+///
+/// A coercion that changes *only* a zero-sized field's type cannot be written:
+/// rustc rejects such a `CoerceUnsized` impl with `E0374`, since no field would
+/// be coerced. A zero-sized field that changes type alongside the pointer is
+/// simply carried over, which `Rc`'s `PhantomData` already exercises.
+pub fn user_ptr_zst_to_dyn() {
+    let unit = ();
+    let sized = Holder {
+        lo: 3,
+        ptr: &unit,
+        hi: 4,
+    };
+    let coerced: Holder<dyn Shape> = sized;
+    assert!(coerced.lo == 3 && coerced.hi == 4);
+    let shape: &dyn Shape = unsafe { &*coerced.ptr };
+    assert!(shape.area() == 7);
 }
 
 /// `Holder<[T; N]> -> Holder<[T]>` attaches the element count instead.

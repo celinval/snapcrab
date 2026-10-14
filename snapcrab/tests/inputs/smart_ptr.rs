@@ -2,7 +2,8 @@
 //!
 //! Unlike `&T` and `Box<T>`, types such as `Rc`, `Arc` and `Pin` are ordinary
 //! structs, so the pointer being unsized sits in a field and the whole struct
-//! has to be rebuilt around the resulting wide pointer.
+//! has to be rebuilt around the resulting wide pointer. The zero-sized cases at
+//! the end cover coercions where the metadata or the pointee carries no bytes.
 
 #![allow(unused)]
 
@@ -19,6 +20,13 @@ struct Square(u32);
 impl Shape for Square {
     fn area(&self) -> u32 {
         self.0 * self.0
+    }
+}
+
+/// A zero-sized implementor, so a coerced pointer addresses no bytes.
+impl Shape for () {
+    fn area(&self) -> u32 {
+        7
     }
 }
 
@@ -71,6 +79,32 @@ pub fn rc_to_unsized_tail() {
     });
     assert!(wrapper.header == 2);
     assert!(wrapper.tail.area() == 25);
+}
+
+/// A zero-sized pointee still gets a vtable: `Rc<()> -> Rc<dyn Trait>` has
+/// nothing to point at, but dispatch must still find the `()` impl.
+pub fn rc_zst_to_dyn() {
+    let shape: Rc<dyn Shape> = Rc::new(());
+    assert!(shape.area() == 7);
+}
+
+/// `&Struct<[u8; 0]> -> &Struct<[u8]>`: the tail coerces from a zero-length
+/// array to a slice, so the metadata is a length of zero rather than a count
+/// of real elements. The sized header stays readable through the wide pointer.
+pub fn ref_empty_slice_tail() {
+    struct WithTail<T: ?Sized> {
+        header: u32,
+        tail: T,
+    }
+
+    let sized = WithTail {
+        header: 5,
+        tail: [0u8; 0],
+    };
+    let unsized_ref: &WithTail<[u8]> = &sized;
+    assert!(unsized_ref.header == 5);
+    assert!(unsized_ref.tail.len() == 0);
+    assert!(unsized_ref.tail.is_empty());
 }
 
 /// `Arc<T> -> Arc<dyn Trait>`. The coercion itself behaves like `Rc`'s, but

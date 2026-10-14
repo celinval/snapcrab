@@ -24,6 +24,20 @@ check_custom_start!(
     start_fn = "pin_to_dyn",
 );
 
+// Coercions where the metadata or the pointee carries no bytes.
+
+check_custom_start!(
+    test_rc_zst_to_dyn,
+    input = "smart_ptr.rs",
+    start_fn = "rc_zst_to_dyn",
+);
+
+check_custom_start!(
+    test_ref_empty_slice_tail,
+    input = "smart_ptr.rs",
+    start_fn = "ref_empty_slice_tail",
+);
+
 // `Arc` coerces like `Rc`, but its atomic refcount needs the atomic
 // intrinsics, so these stop there rather than completing.
 
@@ -60,4 +74,10 @@ check_custom_start!(
     test_user_ptr_to_slice,
     input = "user_smart_ptr.rs",
     start_fn = "user_ptr_to_slice",
+);
+
+check_custom_start!(
+    test_user_ptr_zst_to_dyn,
+    input = "user_smart_ptr.rs",
+    start_fn = "user_ptr_zst_to_dyn",
 );
