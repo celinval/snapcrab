@@ -642,7 +642,11 @@ impl<'a> FnInterpreter<'a> {
                     .map_err(|e| anyhow!("failed to resolve closure `{source_ty}`: {e:?}"))?;
                 Ok(Value::from_type(self.memory.reify_fn(body)))
             }
-            CastKind::Transmute => {
+            // `BoxDerefTransmute` is the transmute behind dereferencing a
+            // `Box`, taking `Box<T>` to `*const T`. Like any transmute it
+            // reinterprets the bytes, which works because a `Box` is a pointer
+            // wrapped in `Unique`/`NonNull`.
+            CastKind::Transmute | CastKind::BoxDerefTransmute => {
                 check::validate_value(&value, target_ty, &self.memory.check_config)?;
                 Ok(value)
             }

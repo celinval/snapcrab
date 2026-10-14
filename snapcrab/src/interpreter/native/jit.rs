@@ -22,10 +22,7 @@ use cranelift_codegen::ir::{self, Function};
 use cranelift_codegen::isa::CallConv;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
-use rustc_public::abi::{
-    FieldsShape, FloatLength, FnAbi, IntegerLength, LayoutShape, PassMode, Primitive, Scalar,
-    ValueAbi,
-};
+use rustc_public::abi::{FloatLength, FnAbi, IntegerLength, PassMode, Primitive, Scalar, ValueAbi};
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::sync::{Arc, Mutex};
@@ -197,12 +194,17 @@ impl JitEngineInner {
                 }))
             }
             PassMode::Pair(_, _) => {
-                let ValueAbi::ScalarPair(first, second) = &fn_abi.ret.layout.shape().abi else {
+                let ValueAbi::ScalarPair {
+                    a: first,
+                    b: second,
+                    b_offset,
+                } = &fn_abi.ret.layout.shape().abi
+                else {
                     bail!("internal error: PassMode::Pair must have ScalarPair ABI");
                 };
                 let ty1 = self.scalar_to_ir_type(first);
                 let ty2 = self.scalar_to_ir_type(second);
-                let second_offset = pair_second_offset(&fn_abi.ret.layout.shape())?;
+                let second_offset = b_offset.bytes();
                 Ok(Some(RetInfo {
                     mode: RetMode::Pair(ty1, ty2, second_offset),
                 }))
@@ -247,10 +249,15 @@ impl JitEngineInner {
                     }
                 },
                 PassMode::Pair(_, _) => {
-                    if let ValueAbi::ScalarPair(first, second) = &arg_abi.layout.shape().abi {
+                    if let ValueAbi::ScalarPair {
+                        a: first,
+                        b: second,
+                        b_offset,
+                    } = &arg_abi.layout.shape().abi
+                    {
                         let ty1 = self.scalar_to_ir_type(first);
                         let ty2 = self.scalar_to_ir_type(second);
-                        let second_offset = pair_second_offset(&arg_abi.layout.shape())?;
+                        let second_offset = b_offset.bytes();
                         let bytes = arg_val.as_bytes();
                         ab.push(ty1, &bytes[..ty1.bytes() as usize]);
                         ab.push(
@@ -529,15 +536,5 @@ impl ArgsBuffer {
             offset,
             size: size as u32,
         });
-    }
-}
-
-/// Get the offset of the second field in a ScalarPair layout.
-///
-/// TODO: replace this by getting pair offset in newer rustc_public version.
-fn pair_second_offset(shape: &LayoutShape) -> Result<usize> {
-    match &shape.fields {
-        FieldsShape::Arbitrary { offsets } if offsets.len() >= 2 => Ok(offsets[1].bytes()),
-        _ => bail!("Expected Arbitrary fields with at least 2 offsets for ScalarPair"),
     }
 }

@@ -251,7 +251,11 @@ pub fn has_padding(ty: Ty) -> bool {
     }
     match &shape.abi {
         ValueAbi::Scalar(_) | ValueAbi::Vector { .. } => false,
-        ValueAbi::ScalarPair(first, second) => {
+        ValueAbi::ScalarPair {
+            a: first,
+            b: second,
+            ..
+        } => {
             let target = crate::memory::machine_info();
             let first_size = scalar_primitive(first).size(target).bytes();
             let second_size = scalar_primitive(second).size(target).bytes();

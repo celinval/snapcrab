@@ -68,7 +68,11 @@ fn validate_recursive(bytes: &[u8], ty: Ty) -> Result<()> {
         ValueAbi::Scalar(scalar) => {
             validate_scalar(bytes, scalar, &ty)?;
         }
-        ValueAbi::ScalarPair(first, second) => {
+        ValueAbi::ScalarPair {
+            a: first,
+            b: second,
+            ..
+        } => {
             let target = MachineInfo::target();
             let first_size = scalar_size(first, &target);
             validate_scalar(&bytes[..first_size], first, &ty)?;

@@ -294,13 +294,15 @@ impl FnInterpreter<'_> {
         error: anyhow::Error,
     ) -> anyhow::Error {
         assert!(self.unwinding.is_none()); // Unwinding should only be for terminator.
-        let span = self.body.blocks[bb_idx].statements[stmt_idx].span;
+        let span = self.body.blocks[bb_idx].statements[stmt_idx]
+            .source_info
+            .span;
         self.generate_error(span, error)
     }
 
     /// Add context to terminator execution errors
     fn terminator_error(&mut self, bb_idx: BasicBlockIdx, error: anyhow::Error) -> anyhow::Error {
-        let span = self.body.blocks[bb_idx].terminator.span;
+        let span = self.body.blocks[bb_idx].terminator.source_info.span;
         self.generate_error(span, error)
     }
 
