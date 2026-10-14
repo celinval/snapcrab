@@ -24,16 +24,15 @@ Roughly in priority order (top first):
 - **Other collections** (`String` growth beyond the basics, maps, sets).
   `Vec` works; the rest are untested.
 - **Crate loading.**
-- **`#[track_caller]` support (blocked on rustc 1.99).** Report the caller
-  `Location` for `#[track_caller]` functions and the panic machinery
-  (`Option::unwrap`, `Result::unwrap`, indexing, …). The pinned `1.98.1`
-  exposes the implicit trailing `&Location` ABI argument, but not the API to
-  resolve the location value. Clean support uses the public
-  `Instance::requires_caller_location` and `Body::caller_location`
-  ([rust-lang/rust#159204](https://github.com/rust-lang/rust/pull/159204)),
-  which land in rustc `1.99`. Deferred until `rust-toolchain.toml` moves to
-  `1.99`; `Body::caller_location` also handles inlining and propagation
-  through nested `#[track_caller]` callers.
+- **Unwinding.** `UnwindAction` is ignored, so a panic ends interpretation
+  without running cleanup and destructors do not run on the panic path.
+- **`Assert` messages.** `AssertMessage::description` drops the operands, so a
+  failed bounds check reports `index out of bounds` where rustc reports
+  `index out of bounds: the len is 2 but the index is 5`.
+- **Rendering formatted panic messages.** `panic!("{x}")`, `assert_eq!` and
+  libcore's UB checks build a `core::fmt::Arguments`, and `Result::unwrap`
+  formats the `Err` through `dyn Debug`. Rendering them needs `dyn Debug`
+  dispatch through vtables whose slots hold our synthetic reified addresses.
 - **Threads.** Needs rustc_public support, then making the `Statics`/`Code`
   segments shareable across threads (they are currently single-threaded).
 
@@ -58,3 +57,9 @@ Improvements we would like in rustc_public:
 - Add a way to retrieve the source for a span (for `annotate_snippets`).
 - Expose `CastTarget` details from `PassMode::Cast` (needed for struct
   pass/return in the C ABI) — see the `PassMode::Cast` interpreter item.
+- Build the caller location from the call terminator's `fn_span`, as
+  `rustc_codegen_ssa` does, rather than from `source_info.span`. The two differ
+  for a method call: rustc and Miri report `x.unwrap()` at the `unwrap`
+  segment, while `Body::caller_location` reports the start of the receiver, so
+  a panic's column does not match. `TerminatorKind::Call` would also need to
+  expose `fn_span`.

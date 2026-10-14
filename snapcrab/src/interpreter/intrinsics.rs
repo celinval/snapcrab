@@ -6,6 +6,7 @@
 use std::mem;
 
 use crate::interpreter::check::validate_value;
+use crate::interpreter::function;
 use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::{self, MonoType};
 use crate::value::Value;
@@ -14,7 +15,9 @@ use num_traits::{SaturatingAdd, SaturatingSub};
 use rustc_public::CrateDefType;
 use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::Instance;
-use rustc_public::ty::{AdtKind, GenericArgs, IntTy, RigidTy, Ty, TyKind, UintTy, VariantDef};
+use rustc_public::ty::{
+    AdtKind, GenericArgs, IntTy, MirConst, RigidTy, Ty, TyKind, UintTy, VariantDef,
+};
 use tracing::debug;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -24,6 +27,7 @@ pub fn eval_intrinsic(
     args: &[Value],
     instance: Instance,
     memory: &mut ThreadMemory,
+    caller_location: Option<MirConst>,
 ) -> Result<Value> {
     debug!("Intrinsic: {name}");
     let config = &memory.check_config;
@@ -97,6 +101,13 @@ pub fn eval_intrinsic(
             // Per the spec, this should be resolved statically.
             // https://doc.rust-lang.org/std/intrinsics/fn.needs_drop.html
             unreachable!("internal error: unexpected `intrinsics::needs_drop` call.");
+        }
+        // The call site resolves the `Location`, since only the call
+        // terminator knows it; see `FnInterpreter::execute_call`.
+        "caller_location" => {
+            let location = caller_location
+                .context("`caller_location` reached without a resolved call site")?;
+            function::evaluate_constant(&location, memory)
         }
         "black_box" => Ok(args[0].clone()),
         // Reverse byte order. The value's bytes are little-endian, so reversing

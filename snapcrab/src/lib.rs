@@ -93,7 +93,7 @@ pub fn run_function(
     // Execute function
     let mut memory = ThreadMemory::new();
     memory.check_config = check_config;
-    let result = invoke_fn(instance, &mut memory, vec![], &mut None)?;
+    let result = invoke_fn(instance, &mut memory, vec![], &mut None, None)?;
 
     // Get return type from instance
     let body = instance.body().context("No body for function")?;
@@ -149,7 +149,7 @@ pub fn run_main(check_config: CheckConfig, native_libs: &[impl AsRef<Path>]) -> 
 
     let mut memory = ThreadMemory::new();
     memory.check_config = check_config;
-    let result = invoke_fn(instance, &mut memory, vec![], &mut None)?;
+    let result = invoke_fn(instance, &mut memory, vec![], &mut None, None)?;
 
     // Convert the result value to an exit code
     match result {

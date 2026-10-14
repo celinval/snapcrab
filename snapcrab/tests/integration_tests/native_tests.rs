@@ -529,3 +529,12 @@ check_extern_crate!(
     start_fn = "test_static_with_mut_ptr",
     result = TestResult::ErrorRegex(r".*unsupported.*duplicated in native code.*".to_string()),
 );
+
+// A `#[track_caller]` function in another crate has no MIR here, so it is
+// called natively and takes the caller `Location` as a real ABI argument.
+check_extern_crate!(
+    test_rust_abi_tracked_caller_line,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_tracked_caller_line",
+);

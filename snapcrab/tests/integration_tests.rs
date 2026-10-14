@@ -16,6 +16,7 @@ mod integration_tests {
     mod smart_ptr_tests;
     mod statics_tests;
     mod std_tests;
+    mod track_caller_tests;
     mod vec_tests;
 }
 
@@ -917,12 +918,4 @@ check_custom_start!(
     test_slice_from_end,
     input = "slice_patterns.rs",
     start_fn = "test_slice_from_end",
-);
-
-// Panic handling tests (exercises native call path via unwrap_failed)
-check_custom_start!(
-    test_unwrap_none_panics,
-    input = "unwrap_panic.rs",
-    start_fn = "unwrap_none",
-    result = TestResult::ErrorRegex(r".*#\[track_caller\] are not yet supported.*".to_string())
 );

@@ -200,3 +200,13 @@ pub fn read_wraps_mut(w: &WrapsMutPadded) -> u8 {
 pub fn get_mut_padded(p: &mut Padded) -> *mut Padded {
     p as *mut Padded
 }
+
+// --- `#[track_caller]` across the crate boundary ---
+
+/// Has no MIR here, so it is called natively and receives the caller's
+/// `Location` as the implicit trailing ABI argument.
+#[track_caller]
+#[inline(never)]
+pub fn tracked_caller_line() -> u32 {
+    std::panic::Location::caller().line()
+}

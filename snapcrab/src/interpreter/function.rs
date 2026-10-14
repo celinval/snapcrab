@@ -4,9 +4,10 @@ use std::thread;
 
 use crate::interpreter::{intrinsics, native, rvalue};
 use crate::memory::{ThreadMemory, pointer_width};
-use crate::ty::{MonoType, pointee_ty};
+use crate::ty::{self, MonoType, pointee_ty};
 use crate::value::Value;
 use anyhow::{Context, Result, anyhow, bail};
+use rustc_public::CrateDef;
 use rustc_public::abi::FieldsShape;
 use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{
@@ -14,7 +15,7 @@ use rustc_public::mir::{
     StatementKind, TerminatorKind,
 };
 use rustc_public::ty::{
-    Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Span, Ty, TyKind,
+    Abi, ClosureKind, ConstantKind, GenericArgKind, MirConst, RigidTy, Ty, TyKind, UintTy,
 };
 use tracing::{debug, info};
 
@@ -41,6 +42,10 @@ pub struct FnInterpreter<'a> {
     body: &'a Body,
     /// The number a call is in the stack during the unwinding
     unwinding: &'a mut Option<u16>,
+    /// The location of a function callsite for functions with `#[track_caller]`.
+    ///
+    /// The MIR body has no local for this implicit argument, so it is held here.
+    caller_location: Option<MirConst>,
 }
 
 /// Run the interpreter for the given instance.
@@ -55,6 +60,7 @@ pub fn invoke_fn(
     memory: &mut ThreadMemory,
     args: Vec<Value>,
     unwinding: &mut Option<u16>,
+    caller_location: Option<MirConst>,
 ) -> Result<Value> {
     // Tier 1: interpret MIR body if available
     if instance.has_body() {
@@ -65,6 +71,7 @@ pub fn invoke_fn(
                 instance,
                 body,
                 unwinding,
+                caller_location,
             };
             interpreter.execute(args)
         });
@@ -72,7 +79,13 @@ pub fn invoke_fn(
 
     // Tier 2: intrinsic shims
     if let Some(intrinsic) = instance.intrinsic_name() {
-        return intrinsics::eval_intrinsic(intrinsic.as_str(), &args, instance, memory);
+        return intrinsics::eval_intrinsic(
+            intrinsic.as_str(),
+            &args,
+            instance,
+            memory,
+            caller_location,
+        );
     }
 
     // Tier 3: Rust allocator shims -- Use our Heap abstraction.
@@ -85,15 +98,36 @@ pub fn invoke_fn(
         return eval_alloc_shim(base, &args, memory);
     }
 
-    // Detect implicit arguments (e.g., #[track_caller] passes &Location).
+    let mut native_args = args;
+    if let Some(location) = caller_location {
+        native_args.push(evaluate_constant(&location, memory)?)
+    }
+
     let fn_abi = instance.fn_abi()?;
-    if fn_abi.args.len() > args.len() {
+
+    // A function that never returns can only leave by panicking or aborting.
+    // Calling it natively would enter the panic runtime, which cannot unwind
+    // back across our JIT trampoline and kills the process, so fail cleanly.
+    // `execute_call` reports the panic entry points it recognizes with a better
+    // message before reaching here.
+    if matches!(fn_abi.ret.ty.kind(), TyKind::RigidTy(RigidTy::Never)) {
+        bail!(
+            "Unsupported call to `{}`: it never returns, so calling it natively \
+             would panic or abort without unwinding back into the interpreter",
+            instance.name()
+        );
+    }
+
+    // Detect an implicit argument the call site did not supply. The
+    // `#[track_caller]` `Location` is appended there, so reaching this means
+    // some other kind of implicit argument.
+    if fn_abi.args.len() > native_args.len() {
         bail!(
             "Failed to invoke `{}`: function expects {} arguments but got {} \
-             (implicit arguments like #[track_caller] are not yet supported)",
+             (unsupported implicit argument)",
             instance.name(),
             fn_abi.args.len(),
-            args.len()
+            native_args.len()
         );
     }
 
@@ -101,7 +135,7 @@ pub fn invoke_fn(
     let config = memory.check_config.clone();
     let jit = &memory.jit;
     panic::catch_unwind(AssertUnwindSafe(|| {
-        native::call_native(instance, &args, &config, jit)
+        native::call_native(instance, &native_args, &config, jit)
     }))
     // Turn the panic payload into the source error, keeping its message, and
     // layer the call context on top.
@@ -243,8 +277,20 @@ impl FnInterpreter<'_> {
         self.body.locals()
     }
 
+    /// Where to report an error raised in this frame.
+    ///
+    /// A `#[track_caller]` function reports its caller's location, so a panic
+    /// raised inside one (such as the bounds-check `Assert` in `Index`) points
+    /// at the user's code rather than the library's.
+    fn error_location(&self, span_location: &str) -> String {
+        self.caller_location
+            .as_ref()
+            .and_then(|location| caller_location_str(location, self.memory).ok())
+            .unwrap_or_else(|| span_location.to_string())
+    }
+
     /// Prints the error including the failing thread
-    fn generate_error(&mut self, span: Span, error: anyhow::Error) -> anyhow::Error {
+    fn generate_error(&mut self, location: &str, error: anyhow::Error) -> anyhow::Error {
         let include_backtrace = match std::env::var("RUST_BACKTRACE").as_deref() {
             Err(_) | Ok("0") => false,
             Ok(_) => true,
@@ -260,8 +306,7 @@ impl FnInterpreter<'_> {
                 || format!("thread_{:?}", thread::current().id()),
                 str::to_string,
             );
-            let span_info = span.diagnostic();
-            let msg = format!("thread '{tname}' panicked at {span_info}\n{}", error);
+            let msg = format!("thread '{tname}' panicked at {location}\n{}", error);
             if std::env::var("RUST_BACKTRACE").is_err() {
                 format!(
                     "{msg}\n note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
@@ -278,9 +323,8 @@ impl FnInterpreter<'_> {
 
         if include_backtrace {
             // Append stack trace
-            let span_info = span.diagnostic();
             let func = self.instance.name();
-            anyhow!("{msg}\n  {current}: at {func}\n      {span_info}")
+            anyhow!("{msg}\n  {current}: at {func}\n      {location}")
         } else {
             anyhow::Error::msg(msg)
         }
@@ -297,13 +341,15 @@ impl FnInterpreter<'_> {
         let span = self.body.blocks[bb_idx].statements[stmt_idx]
             .source_info
             .span;
-        self.generate_error(span, error)
+        let location = self.error_location(&span.diagnostic());
+        self.generate_error(&location, error)
     }
 
     /// Add context to terminator execution errors
     fn terminator_error(&mut self, bb_idx: BasicBlockIdx, error: anyhow::Error) -> anyhow::Error {
         let span = self.body.blocks[bb_idx].terminator.source_info.span;
-        self.generate_error(span, error)
+        let location = self.error_location(&span.diagnostic());
+        self.generate_error(&location, error)
     }
 
     /// Executes a single statement within a basic block.
@@ -520,12 +566,48 @@ impl FnInterpreter<'_> {
             _ => func_instance,
         };
 
-        let result = invoke_fn(callee, self.memory, arg_values, self.unwinding)?;
+        let callee_location = self.callee_location(&callee)?;
+
+        // A panic entry point diverges into the native panic runtime, which
+        // cannot unwind back across our JIT trampoline and aborts the
+        // process. Report the panic here instead, at the location the
+        // callee would have reported.
+        if let Some(location) = callee_location.as_ref()
+            && let Some(message) =
+                panic_entry_message(&callee, &callee.name(), &arg_values, self.memory)?
+        {
+            let where_ = caller_location_str(location, self.memory)
+                .unwrap_or_else(|_| "unknown location".to_string());
+            return Err(self.generate_error(&where_, anyhow!("{message}")));
+        }
+
+        let result = invoke_fn(
+            callee,
+            self.memory,
+            arg_values,
+            self.unwinding,
+            callee_location,
+        )?;
 
         // Store result in destination
         self.assign_to_place(destination, result)?;
 
         Ok(())
+    }
+
+    /// Computes the callee location for the current block's terminator.
+    fn callee_location(&self, callee: &Instance) -> Result<Option<MirConst>> {
+        if !callee.requires_caller_location()
+            && callee.intrinsic_name().as_deref() != Some("caller_location")
+        {
+            return Ok(None);
+        }
+
+        let inherited = self.caller_location.clone();
+        let terminator = &self.body.blocks[self.current_block].terminator;
+        let location = self.body.caller_location(terminator, inherited);
+
+        Ok(Some(location))
     }
 
     /// Run the drop glue for the value held in `place`.
@@ -560,7 +642,7 @@ impl FnInterpreter<'_> {
         let ptr_ty = Ty::new_ptr(place_ty, Mutability::Mut);
         let ptr = self.place_to_ptr(place, ptr_ty)?;
 
-        invoke_fn(drop_instance, self.memory, vec![ptr], self.unwinding)?;
+        invoke_fn(drop_instance, self.memory, vec![ptr], self.unwinding, None)?;
         Ok(())
     }
 
@@ -581,7 +663,7 @@ impl FnInterpreter<'_> {
         let drop_instance = self.memory.resolve_fn(fn_addr)?;
 
         let data = fat.to_data_addr()?;
-        invoke_fn(drop_instance, self.memory, vec![data], self.unwinding)?;
+        invoke_fn(drop_instance, self.memory, vec![data], self.unwinding, None)?;
         Ok(())
     }
 
@@ -603,40 +685,149 @@ impl FnInterpreter<'_> {
     }
 
     /// Evaluates a MIR constant to produce a runtime value.
-    ///
-    /// # Arguments
-    /// * `const_` - The MIR constant to evaluate
-    ///
-    /// # Returns
-    /// * `Ok(Value)` - The constant value
-    /// * `Err(anyhow::Error)` - If constant evaluation fails or type is unsupported
     fn evaluate_constant(&self, const_: &MirConst) -> Result<Value> {
-        match const_.kind() {
-            ConstantKind::Allocated(alloc) => {
-                // Copy the initialized bytes and leave uninitialized ones
-                // zeroed.
-                let mut bytes: Vec<u8> = alloc.bytes.iter().map(|b| b.unwrap_or(0)).collect();
-                // Resolve provenance entries (pointers to other allocations).
-                let ptr_size = pointer_width();
-                for (offset, prov) in &alloc.provenance.ptrs {
-                    let addr = self.memory.resolve_alloc(prov.0)?;
-                    let addr_bytes = addr.to_le_bytes();
-                    bytes[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
-                }
-                Ok(Value::from_bytes(&bytes))
+        evaluate_constant(const_, self.memory)
+    }
+}
+
+/// Evaluate a MIR constant to a runtime value.
+///
+/// Pointers inside the constant are resolved to the addresses the referenced
+/// allocations were materialized at.
+pub(crate) fn evaluate_constant(const_: &MirConst, memory: &ThreadMemory) -> Result<Value> {
+    match const_.kind() {
+        ConstantKind::Allocated(alloc) => {
+            // Copy the initialized bytes and leave uninitialized ones zeroed.
+            let mut bytes: Vec<u8> = alloc.bytes.iter().map(|b| b.unwrap_or(0)).collect();
+            // Resolve provenance entries (pointers to other allocations).
+            let ptr_size = pointer_width();
+            for (offset, prov) in &alloc.provenance.ptrs {
+                let addr = memory.resolve_alloc(prov.0)?;
+                let addr_bytes = addr.to_le_bytes();
+                bytes[*offset..*offset + ptr_size].copy_from_slice(&addr_bytes[..ptr_size]);
             }
-            ConstantKind::ZeroSized => Ok(Value::unit().clone()),
-            ConstantKind::Ty(ty_const) => {
-                bail!("Unexpected type constant: {:?}", ty_const);
-            }
-            ConstantKind::Param(_) => {
-                bail!("Unexpected parameter constants not supported");
-            }
-            ConstantKind::Unevaluated(_) => {
-                bail!("Unexpected unevaluated constants on instance body");
-            }
+            Ok(Value::from_bytes(&bytes))
+        }
+        ConstantKind::ZeroSized => Ok(Value::unit().clone()),
+        ConstantKind::Ty(ty_const) => bail!("Unexpected type constant: {:?}", ty_const),
+        ConstantKind::Param(_) => bail!("Unexpected parameter constants not supported"),
+        ConstantKind::Unevaluated(_) => {
+            bail!("Unexpected unevaluated constants on instance body")
         }
     }
+}
+
+/// The panic message a panic entry point would produce, or `None` if `name` is
+/// not one.
+///
+/// These functions diverge into the native panic runtime, so the interpreter
+/// reports the panic itself. The message comes from the entry's `&str` argument
+/// where it has one. `Result`'s variants omit the `Err` value's `Debug`, which
+/// would need the formatting machinery, and `panic_fmt`-style formatted panics
+/// are not recognized at all.
+fn panic_entry_message(
+    callee: &Instance,
+    name: &str,
+    args: &[Value],
+    memory: &ThreadMemory,
+) -> Result<Option<String>> {
+    // Only the standard library's entry points are recognized, so a user
+    // function that happens to share a path suffix is still executed.
+    if !is_std_crate(callee) {
+        return Ok(None);
+    }
+    let message = if name.ends_with("::panicking::panic")
+        || name.ends_with("::panicking::panic_str_2015")
+        || name.ends_with("::option::expect_failed")
+        || name.contains("::begin_panic::<&str>")
+    {
+        // A `&str` message argument.
+        read_str(&args[0], memory)?
+    } else if name.ends_with("::panicking::panic_bounds_check") {
+        let index = args[0].read_uint();
+        let len = args[1].read_uint();
+        format!("index out of bounds: the len is {len} but the index is {index}")
+    } else if name.ends_with("::option::unwrap_failed") {
+        "called `Option::unwrap()` on a `None` value".to_string()
+    } else if name.ends_with("::result::unwrap_failed") {
+        // `unwrap_failed(msg: &str, error: &dyn Debug)` is shared by `unwrap`,
+        // `expect`, `unwrap_err` and `expect_err`, so the message comes from
+        // the argument. The `Err` value needs formatting, so it is left out.
+        format!(
+            "{}: (the `Err` value is not yet rendered)",
+            read_str(&args[0], memory)?
+        )
+    } else if name.ends_with("::panicking::panic_fmt")
+        || name.ends_with("::rt::panic_fmt")
+        || name.ends_with("::panicking::panic_nounwind_fmt")
+    {
+        // The message is a `core::fmt::Arguments`, so rendering it needs the
+        // formatting machinery. Report the panic without its message rather
+        // than letting it reach the native runtime, which would abort.
+        "panicked with a formatted message, which is not yet rendered".to_string()
+    } else if name.ends_with("::panicking::assert_failed_inner") {
+        // `assert_eq!` and friends. The operands are `&dyn Debug`, so showing
+        // them needs the formatting machinery.
+        "assertion failed, with operands that are not yet rendered".to_string()
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(message))
+}
+
+/// Render a resolved caller `Location` constant as `file:line:col`.
+fn caller_location_str(location: &MirConst, memory: &ThreadMemory) -> Result<String> {
+    let loc_ty = ty::pointee_ty(location.ty())?;
+    let addr = evaluate_constant(location, memory)?.read_uint() as usize;
+    let fields = ty::struct_fields(loc_ty)?;
+    if fields.len() < 3 {
+        bail!(
+            "`{loc_ty}` has {} fields, expected at least 3",
+            fields.len()
+        );
+    }
+
+    // `Location` holds `filename: NonNull<str>`, then `line` and `col`.
+    let ptr_width = pointer_width();
+    let file_off = fields[0].offset;
+    let read_usize = |offset: usize| -> Result<usize> {
+        Ok(memory.read_addr(addr + offset, Ty::usize_ty())?.read_uint() as usize)
+    };
+    let file_ptr = read_usize(file_off)?;
+    let file_len = read_usize(file_off + ptr_width)?;
+    let file = String::from_utf8_lossy(&read_bytes(file_ptr, file_len, memory)?).into_owned();
+
+    let u32_ty = Ty::unsigned_ty(UintTy::U32);
+    let line = memory
+        .read_addr(addr + fields[1].offset, u32_ty)?
+        .read_uint();
+    let col = memory
+        .read_addr(addr + fields[2].offset, u32_ty)?
+        .read_uint();
+    Ok(format!("{file}:{line}:{col}"))
+}
+
+/// Whether an instance is defined in the standard library.
+fn is_std_crate(instance: &Instance) -> bool {
+    matches!(
+        CrateDef::krate(&instance.def).name.as_str(),
+        "core" | "std" | "alloc"
+    )
+}
+
+/// Read a `&str` argument into a `String`.
+fn read_str(val: &Value, memory: &ThreadMemory) -> Result<String> {
+    let addr = val.clone().to_data_addr()?.read_uint() as usize;
+    let len = val.ptr_metadata()?.read_uint() as usize;
+    Ok(String::from_utf8_lossy(&read_bytes(addr, len, memory)?).into_owned())
+}
+
+/// Read `len` bytes at `addr` through the memory sanitizer.
+fn read_bytes(addr: usize, len: usize, memory: &ThreadMemory) -> Result<Vec<u8>> {
+    let u8_ty = Ty::unsigned_ty(UintTy::U8);
+    (0..len)
+        .map(|i| Ok(memory.read_addr(addr + i, u8_ty)?.read_uint() as u8))
+        .collect()
 }
 
 /// Interpret Rust allocator shims (`__rust_[*]alloc` functions).

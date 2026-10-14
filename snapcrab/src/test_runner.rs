@@ -93,7 +93,7 @@ fn run_one(test: &TestCase, check_config: &CheckConfig) -> bool {
     let result = panic::catch_unwind(|| {
         let mut memory = ThreadMemory::new();
         memory.check_config = check_config.clone();
-        invoke_fn(closure, &mut memory, vec![env], &mut None)
+        invoke_fn(closure, &mut memory, vec![env], &mut None, None)
     });
     match result {
         Ok(Ok(_)) => true,
