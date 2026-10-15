@@ -46,6 +46,10 @@ Roughly in priority order (top first):
   `fn` pointer maps to an `Instance` we interpret, but its synthetic address is
   not real machine code, so native code cannot call it until we JIT re-entry
   stubs.
+- Handle uninitialized padding bytes written in native code. Possible changes:
+  - Track all memory reachable across the interpreter/native boundary.
+  - Change Value to use MaybeUninit<u8> and treat padding as uninitialized.
+  - Sanitize values from native code by zeroing their padding bytes.
 
 ## RustC Public
 

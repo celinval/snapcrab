@@ -91,7 +91,7 @@ check_custom_start!(
     input = "track_caller.rs",
     start_fn = "slice_range_out_of_bounds",
     result = TestResult::ErrorRegex(
-        r"(?s).*Unsupported call to `core::slice::index::slice_index_fail`.*never returns.*"
+        r"(?s).*unsupported native call: `core::slice::index::slice_index_fail` never returns.*"
             .to_string()
     )
 );
@@ -100,5 +100,6 @@ check_custom_start!(
     test_track_caller_panic_any_payload,
     input = "track_caller.rs",
     start_fn = "panic_any_payload",
-    result = TestResult::ErrorRegex(r"(?s).*Unsupported call to .*never returns.*".to_string())
+    result =
+        TestResult::ErrorRegex(r"(?s).*unsupported native call: .*never returns.*".to_string())
 );

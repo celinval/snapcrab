@@ -25,6 +25,7 @@ use crate::value::Value;
 use anyhow::{Result, bail};
 use rustc_public::abi::{FnAbi, PassMode};
 use rustc_public::mir::mono::Instance;
+use rustc_public::ty::{RigidTy, TyKind};
 use std::ffi::CString;
 use tracing::{debug, trace};
 
@@ -45,12 +46,12 @@ pub fn call_native(
     let fn_abi = instance.fn_abi()?;
     trace_fn_abi(&name, &mangled, &fn_abi, args.len());
 
+    check_call_safety(&fn_abi, args.len(), &name)?;
+
     // Validate arguments before passing to native code.
     for (arg_abi, arg_val) in fn_abi.args.iter().zip(args.iter()) {
         validate_value(arg_val, arg_abi.ty, config)?;
     }
-
-    check_call_safety(&fn_abi, &name)?;
 
     // Resolve symbol from the current process (cached).
     let symbol_name = mangled.as_str();
@@ -67,46 +68,59 @@ pub fn call_native(
     Ok(result)
 }
 
-/// Bail if a native call may leave interpreter-visible memory uninitialized.
+/// Bail if a native call is unsupported
 ///
-/// This happens when the function takes a mutable pointer/reference to a type
-/// with padding bytes — the native code may write a value whose padding is
-/// uninitialized, and the interpreter will later read those bytes.
-///
-/// Possible future improvements to remove this restrictions:
-/// - Track all memory reachable across the interpreter/native boundary.
-/// - Change Value to use MaybeUninit<u8> and treat padding as uninitialized.
-/// - Sanitize values from native code by zeroing their padding bytes.
-fn check_call_safety(fn_abi: &FnAbi, fn_name: &str) -> Result<()> {
+/// 1. Check if it may leave interpreter-visible memory uninitialized.
+///    This happens when the function takes a mutable pointer/reference to a type
+///    with padding bytes — the native code may write a value whose padding is
+///    uninitialized, and the interpreter will later read those bytes.
+/// 2. A function that never returns can only leave by panicking or aborting.
+///    Either way it would kill the process because unwind or abort inside the JIT
+///    trampoline, which has no unwind information.
+/// 3. Implicit argument: This is a defensive check in case new implicit arguments
+///    are added to rust-call abi.
+fn check_call_safety(fn_abi: &FnAbi, arg_count: usize, fn_name: &str) -> Result<()> {
+    if matches!(fn_abi.ret.ty.kind(), TyKind::RigidTy(RigidTy::Never)) {
+        bail!(
+            "unsupported native call: `{fn_name}` never returns, so calling it would \
+             panic or abort without unwinding back into the interpreter"
+        );
+    }
+
+    // An argument the caller did not supply. The `#[track_caller]` `Location`
+    // is appended at the call site, so reaching this means some other kind of
+    // implicit argument.
+    if fn_abi.args.len() > arg_count {
+        bail!(
+            "unsupported native call: `{fn_name}` expects {} arguments but got {} \
+             (unsupported implicit argument)",
+            fn_abi.args.len(),
+            arg_count
+        );
+    }
+
     for arg_abi in fn_abi.args.iter() {
         if has_mutable_ptr_to_padded(arg_abi.ty) {
             bail!(
-                "unsupported call: `{fn_name}`. The `{}` contains a mutable pointer to a \
-                 type with padding — native code may leave uninitialized bytes",
+                "unsupported native call: `{fn_name}`. The `{}` contains a mutable pointer to a \
+                 type with padding. Native code may write uninitialized bytes",
                 arg_abi.ty
             );
         }
     }
 
-    // Indirect return: the callee writes the full struct including padding
-    // bytes from its native stack over our pre-zeroed buffer. If the return
-    // type has padding, those bytes are uninitialized and may propagate via
-    // memcpy in the interpreter.
     if matches!(fn_abi.ret.mode, PassMode::Indirect { .. }) && has_padding(fn_abi.ret.ty) {
         bail!(
-            "native call `{fn_name}` returns type `{}` with padding via indirect \
-             return — callee may leave padding bytes uninitialized",
+            "unsupported native call: `{fn_name}` returns type `{}` with padding via indirect \
+             return. Callee may leave padding bytes uninitialized",
             fn_abi.ret.ty
         );
     }
 
-    // If the return type contains any pointer to a padded type, the
-    // interpreter may later read through it into native-allocated memory
-    // with uninitialized padding (regardless of pointer mutability).
     if has_any_ptr_to_padded(fn_abi.ret.ty) {
         bail!(
-            "native call `{fn_name}` returns type containing a pointer \
-             to a type with padding — interpreter may read uninitialized bytes"
+            "unsupported native call: `{fn_name}` returns type containing a pointer \
+             to a type with padding. Interpreter may read uninitialized bytes"
         );
     }
 

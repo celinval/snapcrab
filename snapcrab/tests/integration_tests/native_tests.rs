@@ -458,7 +458,10 @@ check_extern_crate!(
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
     start_fn = "test_write_padded",
-    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+    result = TestResult::ErrorRegex(
+        r".*unsupported native call: `dep_rust_abi::write_padded`.*mutable pointer.*padding.*"
+            .to_string()
+    ),
 );
 
 check_extern_crate!(
@@ -466,7 +469,10 @@ check_extern_crate!(
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
     start_fn = "test_write_padded_raw",
-    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+    result = TestResult::ErrorRegex(
+        r".*unsupported native call: `dep_rust_abi::write_padded_raw`.*mutable pointer.*padding.*"
+            .to_string()
+    ),
 );
 
 check_extern_crate!(
@@ -474,7 +480,10 @@ check_extern_crate!(
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
     start_fn = "test_read_wraps_mut",
-    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+    result = TestResult::ErrorRegex(
+        r".*unsupported native call: `dep_rust_abi::read_wraps_mut`.*mutable pointer.*padding.*"
+            .to_string()
+    ),
 );
 
 check_extern_crate!(
@@ -482,7 +491,10 @@ check_extern_crate!(
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
     start_fn = "test_return_mut_padded",
-    result = TestResult::ErrorRegex(r".*mutable pointer.*padding.*".to_string()),
+    result = TestResult::ErrorRegex(
+        r".*unsupported native call: `dep_rust_abi::get_mut_padded`.*mutable pointer.*padding.*"
+            .to_string()
+    ),
 );
 
 // --- On-stack passing (register exhaustion) ---
@@ -519,7 +531,8 @@ check_extern_crate!(
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
     start_fn = "test_external_mutable_static",
-    result = TestResult::ErrorRegex(r".*unsupported.*duplicated in native code.*".to_string()),
+    result =
+        TestResult::ErrorRegex(r".*unsupported: static .*duplicated in native code.*".to_string()),
 );
 
 check_extern_crate!(
@@ -527,7 +540,8 @@ check_extern_crate!(
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
     start_fn = "test_static_with_mut_ptr",
-    result = TestResult::ErrorRegex(r".*unsupported.*duplicated in native code.*".to_string()),
+    result =
+        TestResult::ErrorRegex(r".*unsupported: static .*duplicated in native code.*".to_string()),
 );
 
 // A `#[track_caller]` function in another crate has no MIR here, so it is

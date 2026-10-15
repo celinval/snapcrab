@@ -98,40 +98,13 @@ pub fn invoke_fn(
         return eval_alloc_shim(base, &args, memory);
     }
 
+    // Tier 4: native call via dlsym. `call_native` rejects the calls it cannot
+    // support, such as one that never returns.
     let mut native_args = args;
     if let Some(location) = caller_location {
         native_args.push(evaluate_constant(&location, memory)?)
     }
 
-    let fn_abi = instance.fn_abi()?;
-
-    // A function that never returns can only leave by panicking or aborting.
-    // Calling it natively would enter the panic runtime, which cannot unwind
-    // back across our JIT trampoline and kills the process, so fail cleanly.
-    // `execute_call` reports the panic entry points it recognizes with a better
-    // message before reaching here.
-    if matches!(fn_abi.ret.ty.kind(), TyKind::RigidTy(RigidTy::Never)) {
-        bail!(
-            "Unsupported call to `{}`: it never returns, so calling it natively \
-             would panic or abort without unwinding back into the interpreter",
-            instance.name()
-        );
-    }
-
-    // Detect an implicit argument the call site did not supply. The
-    // `#[track_caller]` `Location` is appended there, so reaching this means
-    // some other kind of implicit argument.
-    if fn_abi.args.len() > native_args.len() {
-        bail!(
-            "Failed to invoke `{}`: function expects {} arguments but got {} \
-             (unsupported implicit argument)",
-            instance.name(),
-            fn_abi.args.len(),
-            native_args.len()
-        );
-    }
-
-    // Tier 4: native call via dlsym
     let config = memory.check_config.clone();
     let jit = &memory.jit;
     panic::catch_unwind(AssertUnwindSafe(|| {
