@@ -103,3 +103,12 @@ check_custom_start!(
     result =
         TestResult::ErrorRegex(r"(?s).*unsupported native call: .*never returns.*".to_string())
 );
+
+check_custom_start!(
+    test_track_caller_formatted_panic,
+    input = "track_caller.rs",
+    start_fn = "formatted_panic",
+    result = TestResult::ErrorRegex(
+        r"(?s).*track_caller\.rs:128:5.*formatted message, which is not yet rendered.*".to_string()
+    )
+);

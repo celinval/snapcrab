@@ -44,6 +44,7 @@ pub fn run_interpreter_test(input_file: &Path) -> TestResult {
     let rustc_args = vec![
         "snapcrab".to_string(),
         "--crate-type=bin".to_string(),
+        "--edition=2024".to_string(),
         format!("--out-dir={}", out_dir.to_str().unwrap()),
         input_file.to_string_lossy().to_string(),
     ];
@@ -77,6 +78,7 @@ pub fn run_custom_start_test_with_libs(
     let rustc_args = vec![
         "snapcrab".to_string(),
         "--crate-type=lib".to_string(),
+        "--edition=2024".to_string(),
         input_file.to_string_lossy().to_string(),
     ];
 
@@ -119,7 +121,7 @@ pub fn compile_cdylib(source: &Path) -> std::path::PathBuf {
     let rustc_args = vec![
         "snapcrab".to_string(),
         "--crate-type=cdylib".to_string(),
-        "--edition=2021".to_string(),
+        "--edition=2024".to_string(),
         "-o".to_string(),
         lib_path.to_str().unwrap().to_string(),
         source.to_str().unwrap().to_string(),
@@ -161,7 +163,7 @@ pub fn compile_dylib_and_rlib(source: &Path) -> (std::path::PathBuf, std::path::
         "snapcrab".to_string(),
         "--crate-type=dylib".to_string(),
         "--crate-type=rlib".to_string(),
-        "--edition=2021".to_string(),
+        "--edition=2024".to_string(),
         format!("--out-dir={}", out_dir.to_str().unwrap()),
         source.to_str().unwrap().to_string(),
     ];
@@ -195,7 +197,7 @@ pub fn run_extern_crate_test(dep_source: &Path, input_file: &Path, start_fn: &st
     let rustc_args = vec![
         "snapcrab".to_string(),
         "--crate-type=lib".to_string(),
-        "--edition=2021".to_string(),
+        "--edition=2024".to_string(),
         format!("--extern={}={}", dep_name, rlib_path.to_str().unwrap()),
         input_file.to_string_lossy().to_string(),
     ];

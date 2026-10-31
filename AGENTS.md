@@ -140,9 +140,8 @@ Report what you ruled out and the smallest input that still reproduces it. Do
 not guess at a cause, paper over it by relaxing the test, or leave it
 unmentioned.
 
-Note that the test harness compiles inputs with an older edition
-(`tests/common/mod.rs`), so check that edition too if an input is
-edition-sensitive — a divergence should never be just an edition difference.
+Use the edition the test harness compiles inputs with (`tests/common/mod.rs`),
+so a divergence is never just an edition difference.
 
 ### Adding tests
 

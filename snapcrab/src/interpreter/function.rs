@@ -5,7 +5,7 @@ use std::thread;
 use crate::interpreter::{intrinsics, native, rvalue};
 use crate::memory::{ThreadMemory, pointer_width};
 use crate::ty::{self, MonoType, pointee_ty};
-use crate::value::Value;
+use crate::value::{Value, uint_from_bytes};
 use anyhow::{Context, Result, anyhow, bail};
 use rustc_public::CrateDef;
 use rustc_public::abi::FieldsShape;
@@ -734,10 +734,13 @@ fn panic_entry_message(
         || name.ends_with("::rt::panic_fmt")
         || name.ends_with("::panicking::panic_nounwind_fmt")
     {
-        // The message is a `core::fmt::Arguments`, so rendering it needs the
-        // formatting machinery. Report the panic without its message rather
-        // than letting it reach the native runtime, which would abort.
-        "panicked with a formatted message, which is not yet rendered".to_string()
+        // The message is a `core::fmt::Arguments`. One built from a plain
+        // string literal holds it directly; anything else needs the formatting
+        // machinery, so report the panic without its message rather than let it
+        // reach the native runtime, which would abort.
+        literal_fmt_arguments(callee, &args[0], memory)?.unwrap_or_else(|| {
+            "panicked with a formatted message, which is not yet rendered".to_string()
+        })
     } else if name.ends_with("::panicking::assert_failed_inner") {
         // `assert_eq!` and friends. The operands are `&dyn Debug`, so showing
         // them needs the formatting machinery.
@@ -778,6 +781,39 @@ fn caller_location_str(location: &MirConst, memory: &ThreadMemory) -> Result<Str
         .read_addr(addr + fields[2].offset, u32_ty)?
         .read_uint();
     Ok(format!("{file}:{line}:{col}"))
+}
+
+/// The message of a `core::fmt::Arguments` built from a plain string literal.
+///
+/// Returns `None` for an `Arguments` with formatted parameters, or if the type
+/// does not have the expected layout.
+///
+/// This mirrors `Arguments::as_str`: the struct holds a `template` pointer and
+/// an `args` pointer, and for a literal `args` instead encodes the literal's
+/// length as `(len << 1) | 1`, with `template` pointing at its bytes. That
+/// encoding is a `core` implementation detail, hence the layout check.
+fn literal_fmt_arguments(
+    callee: &Instance,
+    arguments: &Value,
+    memory: &ThreadMemory,
+) -> Result<Option<String>> {
+    let arguments_ty = callee.fn_abi()?.args[0].ty;
+    let fields = ty::struct_fields(arguments_ty)?;
+    let ptr_width = pointer_width();
+    let [template, args] = fields.as_slice() else {
+        return Ok(None);
+    };
+    if template.size != ptr_width || args.size != ptr_width {
+        return Ok(None);
+    }
+    let bytes = arguments.as_bytes();
+    let read = |offset: usize| uint_from_bytes(&bytes[offset..offset + ptr_width]) as usize;
+    let encoded = read(args.offset);
+    if encoded & 1 == 0 {
+        return Ok(None);
+    }
+    let message = read_bytes(read(template.offset), encoded >> 1, memory)?;
+    Ok(Some(String::from_utf8_lossy(&message).into_owned()))
 }
 
 /// Whether an instance is defined in the standard library.

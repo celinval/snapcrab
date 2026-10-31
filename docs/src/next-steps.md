@@ -32,10 +32,6 @@ Roughly in priority order (top first):
   dispatch through vtables whose slots hold our synthetic reified addresses.
 - **Threads.** Needs rustc_public support, then making the `Statics`/`Code`
   segments shareable across threads (they are currently single-threaded).
-- **Compile test inputs with edition 2024.** The harness passes no `--edition`
-  for most inputs, so they compile as edition 2015, which hides edition-specific
-  lowering (e.g. `panic!` going through `std::rt::panic_fmt`). The native
-  library inputs need `#[unsafe(no_mangle)]` first.
 
 ## Native calls
 

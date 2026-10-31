@@ -120,3 +120,10 @@ pub fn slice_range_out_of_bounds() -> u32 {
 pub fn panic_any_payload() {
     std::panic::panic_any(42u32);
 }
+
+/// A `panic!` with format parameters is reported at its location, but its
+/// message is not rendered yet, since that needs the formatting machinery.
+pub fn formatted_panic() {
+    let value = std::hint::black_box(7u32);
+    panic!("value was {value}");
+}
