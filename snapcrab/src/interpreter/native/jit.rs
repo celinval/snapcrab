@@ -417,13 +417,13 @@ impl JitEngineInner {
             for entry in arg_layout {
                 match entry {
                     ArgEntry::Scalar { offset, ty } => {
-                        let addr = builder.ins().iadd_imm(args_buf_param, *offset as i64);
+                        let addr = builder.ins().iadd_imm_u(args_buf_param, *offset as i64);
                         let val = builder.ins().load(*ty, MemFlagsData::trusted(), addr, 0);
                         call_args.push(val);
                     }
                     ArgEntry::Struct { offset, .. } => {
                         // StructArgument: pass pointer to the data in the buffer.
-                        let addr = builder.ins().iadd_imm(args_buf_param, *offset as i64);
+                        let addr = builder.ins().iadd_imm_u(args_buf_param, *offset as i64);
                         call_args.push(addr);
                     }
                 }
@@ -462,7 +462,7 @@ impl JitEngineInner {
 
             builder.ins().return_(&[]);
             builder.seal_all_blocks();
-            builder.finalize();
+            builder.finalize(self.module.target_config());
         }
 
         // Compile.
