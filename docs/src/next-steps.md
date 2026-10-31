@@ -35,6 +35,10 @@ Roughly in priority order (top first):
   dispatch through vtables whose slots hold our synthetic reified addresses.
 - **Threads.** Needs rustc_public support, then making the `Statics`/`Code`
   segments shareable across threads (they are currently single-threaded).
+- **Compile test inputs with edition 2024.** The harness passes no `--edition`
+  for most inputs, so they compile as edition 2015, which hides edition-specific
+  lowering (e.g. `panic!` going through `std::rt::panic_fmt`). The native
+  library inputs need `#[unsafe(no_mangle)]` first.
 
 ## Native calls
 
@@ -46,6 +50,9 @@ Roughly in priority order (top first):
   `fn` pointer maps to an `Instance` we interpret, but its synthetic address is
   not real machine code, so native code cannot call it until we JIT re-entry
   stubs.
+- Test the return-type checks in `check_call_safety`. Neither the padded
+  indirect return nor the returned pointer to a padded type is covered:
+  `test_reject_return_mut_ptr_to_padded` is rejected on its argument instead.
 - Handle uninitialized padding bytes written in native code. Possible changes:
   - Track all memory reachable across the interpreter/native boundary.
   - Change Value to use MaybeUninit<u8> and treat padding as uninitialized.
