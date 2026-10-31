@@ -91,6 +91,12 @@ impl BinaryEval for BinOp {
 impl UnaryEval for UnOp {
     fn eval(&self, operand: &Value, result_type: RigidTy) -> Result<Value> {
         match self {
+            // Bitwise complement is the same for every integer width and
+            // signedness, so invert the bytes directly.
+            UnOp::Not if matches!(result_type, RigidTy::Int(_) | RigidTy::Uint(_)) => {
+                let inverted: Vec<u8> = operand.as_bytes().iter().map(|byte| !byte).collect();
+                Ok(Value::from_bytes(&inverted))
+            }
             UnOp::Not | UnOp::Neg => match result_type {
                 RigidTy::Int(int_ty) => match int_ty {
                     IntTy::I8 => eval_int_unop::<i8>(*self, operand),
@@ -101,7 +107,10 @@ impl UnaryEval for UnOp {
                     IntTy::Isize => eval_int_unop::<isize>(*self, operand),
                 },
                 RigidTy::Bool => eval_bool_unop(*self, operand),
-                RigidTy::Uint(_) => bail!("Unary operations on unsigned integers not supported"),
+                RigidTy::Uint(_) => bail!(
+                    "cannot negate the unsigned type `{}`",
+                    Ty::from_rigid_kind(result_type)
+                ),
                 _ => bail!(
                     "Unsupported operation `{self:?}` on `{}` type",
                     Ty::from_rigid_kind(result_type)
@@ -1037,6 +1046,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result, Value::from_type(8i128));
+    }
+
+    #[test]
+    fn test_not_unsigned() {
+        let result = UnOp::Not
+            .eval(&Value::from_type(0b0100u32), RigidTy::Uint(UintTy::U32))
+            .unwrap();
+        assert_eq!(result, Value::from_type(!0b0100u32));
+        let result = UnOp::Not
+            .eval(&Value::from_type(0u128), RigidTy::Uint(UintTy::U128))
+            .unwrap();
+        assert_eq!(result, Value::from_type(u128::MAX));
+    }
+
+    #[test]
+    fn test_not_signed() {
+        let result = UnOp::Not
+            .eval(&Value::from_type(5i8), RigidTy::Int(IntTy::I8))
+            .unwrap();
+        assert_eq!(result, Value::from_type(!5i8));
+        let result = UnOp::Not
+            .eval(&Value::from_type(-1i64), RigidTy::Int(IntTy::I64))
+            .unwrap();
+        assert_eq!(result, Value::from_type(0i64));
     }
 
     #[test]
