@@ -8,6 +8,7 @@ mod integration_tests {
     mod drop_tests;
     mod dyn_tests;
     mod enum_tests;
+    mod float_tests;
     mod fn_pointer_tests;
     mod heap_tests;
     mod intrinsics_tests;

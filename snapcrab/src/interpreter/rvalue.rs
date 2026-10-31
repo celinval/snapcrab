@@ -12,9 +12,10 @@ use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{AggregateKind, BinOp, CastKind, Operand, PointerCoercion, Rvalue, UnOp};
 use rustc_public::target::MachineInfo;
 use rustc_public::ty::{
-    AdtDef, ClosureKind, IntTy, RigidTy, Ty, TyKind, UintTy, VariantIdx, VtblEntry,
+    AdtDef, ClosureKind, FloatTy, IntTy, RigidTy, Ty, TyKind, UintTy, VariantIdx, VtblEntry,
 };
 use rustc_public_bridge::IndexedVal;
+use std::cmp::Ordering;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::check;
@@ -69,6 +70,8 @@ impl BinaryEval for BinOp {
                 UintTy::Usize => eval_int_binop::<usize>(*self, left, right),
             },
             RigidTy::Bool => eval_bool_binop(*self, left, right),
+            RigidTy::Float(FloatTy::F32) => eval_float_binop::<f32>(*self, left, right),
+            RigidTy::Float(FloatTy::F64) => eval_float_binop::<f64>(*self, left, right),
             RigidTy::Char => eval_int_binop::<u32>(*self, left, right),
             RigidTy::RawPtr(_, _) | RigidTy::Ref(_, _, _) => {
                 let ty = Ty::from_rigid_kind(operand_type.clone());
@@ -107,6 +110,12 @@ impl UnaryEval for UnOp {
                     IntTy::Isize => eval_int_unop::<isize>(*self, operand),
                 },
                 RigidTy::Bool => eval_bool_unop(*self, operand),
+                RigidTy::Float(FloatTy::F32) if *self == UnOp::Neg => {
+                    Ok(Value::from_type(-operand.as_type::<f32>().unwrap()))
+                }
+                RigidTy::Float(FloatTy::F64) if *self == UnOp::Neg => {
+                    Ok(Value::from_type(-operand.as_type::<f64>().unwrap()))
+                }
                 RigidTy::Uint(_) => bail!(
                     "cannot negate the unsigned type `{}`",
                     Ty::from_rigid_kind(result_type)
@@ -193,6 +202,7 @@ where
         BinOp::Le => Ok(Value::from_bool(left <= right)),
         BinOp::Gt => Ok(Value::from_bool(left > right)),
         BinOp::Ge => Ok(Value::from_bool(left >= right)),
+        BinOp::Cmp => Ok(ordering_value(left.partial_cmp(&right))),
         _ => bail!("Unsupported integer binary operation: {:?}", op),
     }
 }
@@ -400,6 +410,56 @@ fn eval_shift(
     Ok(Value::from_bytes(&result_bytes[..lhs.len()]))
 }
 
+/// Evaluates a binary operation on floating-point values.
+///
+/// The host's own float arithmetic is IEEE 754, as Rust's is, so NaN and
+/// signed zero behave as they would natively: NaN is unequal to everything,
+/// and `0.0 == -0.0`. Comparing the bytes instead would get both wrong.
+fn eval_float_binop<T>(op: BinOp, l: &Value, r: &Value) -> Result<Value>
+where
+    T: FromBytes
+        + IntoBytes
+        + Immutable
+        + PartialOrd
+        + std::ops::Add<Output = T>
+        + std::ops::Sub<Output = T>
+        + std::ops::Mul<Output = T>
+        + std::ops::Div<Output = T>
+        + std::ops::Rem<Output = T>,
+{
+    let left = l.as_type::<T>().unwrap();
+    let right = r.as_type::<T>().unwrap();
+    let value = match op {
+        BinOp::Add => Value::from_type(left + right),
+        BinOp::Sub => Value::from_type(left - right),
+        BinOp::Mul => Value::from_type(left * right),
+        BinOp::Div => Value::from_type(left / right),
+        BinOp::Rem => Value::from_type(left % right),
+        BinOp::Eq => Value::from_bool(left == right),
+        BinOp::Ne => Value::from_bool(left != right),
+        BinOp::Lt => Value::from_bool(left < right),
+        BinOp::Le => Value::from_bool(left <= right),
+        BinOp::Gt => Value::from_bool(left > right),
+        BinOp::Ge => Value::from_bool(left >= right),
+        _ => bail!("Unsupported floating-point binary operation: {op:?}"),
+    };
+    Ok(value)
+}
+
+/// The `core::cmp::Ordering` value for a comparison result.
+///
+/// `Ordering` is `#[repr(i8)]`, with `Less`, `Equal` and `Greater` as `-1`, `0`
+/// and `1`. `BinOp::Cmp` is only emitted for totally ordered types, so
+/// `ordering` is always `Some`.
+fn ordering_value(ordering: Option<Ordering>) -> Value {
+    let discriminant: i8 = match ordering.expect("`BinOp::Cmp` operands are totally ordered") {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    };
+    Value::from_type(discriminant)
+}
+
 /// Evaluates a binary operation on boolean values.
 fn eval_bool_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value> {
     let left = l.as_bool().unwrap();
@@ -410,6 +470,7 @@ fn eval_bool_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value> {
         BinOp::BitXor => left ^ right,
         BinOp::Eq => left == right,
         BinOp::Ne => left != right,
+        BinOp::Cmp => return Ok(ordering_value(left.partial_cmp(&right))),
         _ => bail!("Unsupported boolean binary operation: {:?}", op),
     };
     Ok(Value::from_bool(result))

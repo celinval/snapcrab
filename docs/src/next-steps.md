@@ -12,7 +12,8 @@ Roughly in priority order (top first):
 - **`PassMode::Cast` in the native ABI.** Passing/returning small structs and
   arrays by value across the C ABI. The single largest bucket of ignored
   tests. Needs `CastTarget` exposed from rustc_public (see below).
-- **Float comparison** (`Eq`/ordering on `f32`/`f64`).
+- **Float casts** (`FloatToInt`, `IntToFloat`, `FloatToFloat`), and `f16`/`f128`
+  arithmetic, which the host cannot do natively on a stable toolchain.
 - **Calling a `fn` pointer through the `Fn` traits.** The `FnOnce`/`FnMut`
   impls for `fn` pointers are shims without bodies, so passing a function
   (rather than a closure) where a closure is expected fails with an argument
