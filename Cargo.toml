@@ -22,11 +22,11 @@ rust-version = "1.97.0"
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
-cranelift = { version = "0.133.1", features = ["native"] }
-cranelift-codegen = "0.133.1"
-cranelift-frontend = "0.133.1"
-cranelift-jit = "0.133.1"
-cranelift-module = "0.133.1"
+cranelift = { version = "0.134.4", features = ["native"] }
+cranelift-codegen = "0.134.4"
+cranelift-frontend = "0.134.4"
+cranelift-jit = "0.134.4"
+cranelift-module = "0.134.4"
 libc = "0.2"
 num-traits = "0.2"
 regex = "1.0"
