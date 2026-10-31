@@ -196,9 +196,24 @@ pub fn read_wraps_mut(w: &WrapsMutPadded) -> u8 {
     w.inner.a
 }
 
-/// Returns a mutable pointer to a padded type.
-pub fn get_mut_padded(p: &mut Padded) -> *mut Padded {
-    p as *mut Padded
+/// Returns a pointer to a padded type. The argument is an immutable
+/// reference, so only the return type makes the call unsafe to make natively.
+pub fn get_padded_ptr(p: &Padded) -> *const Padded {
+    p as *const Padded
+}
+
+/// A struct with padding that is too large to return in registers, so it is
+/// returned through a hidden pointer.
+pub struct LargePadded {
+    pub a: u8,
+    pub b: u64,
+    pub c: u64,
+    pub d: u64,
+}
+
+/// Returns a padded struct indirectly.
+pub fn make_large_padded() -> LargePadded {
+    LargePadded { a: 1, b: 2, c: 3, d: 4 }
 }
 
 // --- `#[track_caller]` across the crate boundary ---

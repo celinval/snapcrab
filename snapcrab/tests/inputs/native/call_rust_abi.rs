@@ -197,14 +197,18 @@ pub fn test_read_wraps_mut() {
     dep_rust_abi::read_wraps_mut(&w);
 }
 
-pub fn test_return_mut_padded() {
-    let mut p = dep_rust_abi::Padded { a: 0, b: 0 };
-    let _ = dep_rust_abi::get_mut_padded(&mut p);
+pub fn test_return_ptr_to_padded() {
+    let p = dep_rust_abi::Padded { a: 0, b: 0 };
+    let _ = dep_rust_abi::get_padded_ptr(&p);
+}
+
+pub fn test_return_large_padded() {
+    let _ = dep_rust_abi::make_large_padded();
 }
 
 /// A native `#[track_caller]` call: the interpreter appends the caller
 /// `Location` as a real argument, and the native code reads the line through
-/// it. The call below is on the line asserted here.
+/// it. `line!()` is on the same line as the call.
 pub fn test_tracked_caller_line() {
-    assert!(dep_rust_abi::tracked_caller_line() == 209);
+    assert!(dep_rust_abi::tracked_caller_line() == line!());
 }

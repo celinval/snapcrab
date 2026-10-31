@@ -47,9 +47,6 @@ Roughly in priority order (top first):
   `fn` pointer maps to an `Instance` we interpret, but its synthetic address is
   not real machine code, so native code cannot call it until we JIT re-entry
   stubs.
-- Test the return-type checks in `check_call_safety`. Neither the padded
-  indirect return nor the returned pointer to a padded type is covered:
-  `test_reject_return_mut_ptr_to_padded` is rejected on its argument instead.
 - Handle uninitialized padding bytes written in native code. Possible changes:
   - Track all memory reachable across the interpreter/native boundary.
   - Change Value to use MaybeUninit<u8> and treat padding as uninitialized.

@@ -487,12 +487,23 @@ check_extern_crate!(
 );
 
 check_extern_crate!(
-    test_reject_return_mut_ptr_to_padded,
+    test_reject_return_ptr_to_padded,
     dep = "native/dep_rust_abi.rs",
     input = "native/call_rust_abi.rs",
-    start_fn = "test_return_mut_padded",
+    start_fn = "test_return_ptr_to_padded",
     result = TestResult::ErrorRegex(
-        r".*unsupported native call: `dep_rust_abi::get_mut_padded`.*mutable pointer.*padding.*"
+        r".*unsupported native call: `dep_rust_abi::get_padded_ptr` returns type containing a pointer to a type with padding.*"
+            .to_string()
+    ),
+);
+
+check_extern_crate!(
+    test_reject_indirect_return_padded,
+    dep = "native/dep_rust_abi.rs",
+    input = "native/call_rust_abi.rs",
+    start_fn = "test_return_large_padded",
+    result = TestResult::ErrorRegex(
+        r".*unsupported native call: `dep_rust_abi::make_large_padded` returns type `dep_rust_abi::LargePadded` with padding via indirect return.*"
             .to_string()
     ),
 );
