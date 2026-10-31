@@ -65,7 +65,6 @@ check_native_call!(
 // --- Floating point ---
 
 check_native_call!(
-    #[ignore] // float Eq not yet supported in interpreter
     test_native_add_f64,
     native_lib = "native/lib_basic.rs",
     input = "native/call_basic.rs",
@@ -73,7 +72,6 @@ check_native_call!(
 );
 
 check_native_call!(
-    #[ignore] // float Eq not yet supported in interpreter
     test_native_add_f32,
     native_lib = "native/lib_basic.rs",
     input = "native/call_basic.rs",
