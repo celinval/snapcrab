@@ -1,5 +1,3 @@
-use crate::common::TestResult;
-
 check_custom_start!(
     test_rc_to_dyn,
     input = "smart_ptr.rs",
@@ -38,21 +36,16 @@ check_custom_start!(
     start_fn = "ref_empty_slice_tail",
 );
 
-// `Arc` coerces like `Rc`, but its atomic refcount needs the atomic
-// intrinsics, so these stop there rather than completing.
-
 check_custom_start!(
     test_arc_to_dyn,
     input = "smart_ptr.rs",
     start_fn = "arc_to_dyn",
-    result = TestResult::ErrorRegex(r".*Unimplemented intrinsic `atomic_[a-z]+`.*".to_string()),
 );
 
 check_custom_start!(
     test_arc_to_slice,
     input = "smart_ptr.rs",
     start_fn = "arc_to_slice",
-    result = TestResult::ErrorRegex(r".*Unimplemented intrinsic `atomic_[a-z]+`.*".to_string()),
 );
 
 check_custom_start!(

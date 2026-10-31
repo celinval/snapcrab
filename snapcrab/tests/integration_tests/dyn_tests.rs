@@ -1,7 +1,5 @@
 //! Virtual dispatch and drop through trait-object vtables.
 
-use crate::common::TestResult;
-
 check_custom_start!(
     test_dyn_call_via_ref,
     input = "dyn_dispatch.rs",
@@ -61,13 +59,10 @@ check_custom_start!(
     start_fn = "recv_rc_self",
 );
 
-// The coercion itself works; `Arc` then drops its atomic refcount, which needs
-// the atomic intrinsics.
 check_custom_start!(
     test_dyn_recv_arc_self,
     input = "dyn_dispatch.rs",
     start_fn = "recv_arc_self",
-    result = TestResult::ErrorRegex(r".*Unimplemented intrinsic `atomic_[a-z]+`.*".to_string()),
 );
 
 check_custom_start!(

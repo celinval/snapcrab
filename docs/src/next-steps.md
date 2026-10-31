@@ -12,10 +12,6 @@ Roughly in priority order (top first):
 - **`PassMode::Cast` in the native ABI.** Passing/returning small structs and
   arrays by value across the C ABI. The single largest bucket of ignored
   tests. Needs `CastTarget` exposed from rustc_public (see below).
-- **Atomic intrinsics** (`atomic_load`/`atomic_store`/`atomic_xsub`, …). Needed
-  by anything with an atomic refcount or an interior-mutable `static`: `Arc`
-  coerces and dispatches correctly but cannot be dropped, and
-  `AtomicU32::store` is unsupported.
 - **Float comparison** (`Eq`/ordering on `f32`/`f64`).
 - **Calling a `fn` pointer through the `Fn` traits.** The `FnOnce`/`FnMut`
   impls for `fn` pointers are shims without bodies, so passing a function

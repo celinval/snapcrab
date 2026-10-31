@@ -183,10 +183,74 @@ pub fn eval_intrinsic(
         }
         // Saturating arithmetic clamps to the type's bounds instead of
         // wrapping. The generic type is the intrinsic's first type argument.
+        // Atomics. A `ThreadMemory` runs a single thread, so an atomic access
+        // is a plain read-modify-write and every ordering is trivially met.
+        "atomic_load" => {
+            let ty = intrinsic_type_arg(instance, 0)?;
+            memory.read_addr(args[0].read_uint() as usize, ty)
+        }
+        "atomic_store" => {
+            let ty = intrinsic_type_arg(instance, 0)?;
+            memory.write_addr(args[0].read_uint() as usize, args[1].as_bytes(), ty)?;
+            Ok(Value::unit().clone())
+        }
+        "atomic_cxchg" | "atomic_cxchgweak" => {
+            let ty = intrinsic_type_arg(instance, 0)?;
+            let addr = args[0].read_uint() as usize;
+            let old = memory.read_addr(addr, ty)?;
+            // The weak form may fail spuriously, but never doing so is valid.
+            let matched = old.as_bytes() == args[1].as_bytes();
+            if matched {
+                memory.write_addr(addr, args[2].as_bytes(), ty)?;
+            }
+            let ret_ty = instance.fn_abi()?.ret.ty;
+            Value::from_tuple_with_layout(&[old, Value::from_bool(matched)], ret_ty)
+        }
+        "atomic_xchg" | "atomic_xadd" | "atomic_xsub" | "atomic_and" | "atomic_nand"
+        | "atomic_or" | "atomic_xor" | "atomic_max" | "atomic_min" | "atomic_umax"
+        | "atomic_umin" => {
+            let ty = intrinsic_type_arg(instance, 0)?;
+            let addr = args[0].read_uint() as usize;
+            let old = memory.read_addr(addr, ty)?;
+            let new = atomic_rmw(name, &old, &args[1]);
+            memory.write_addr(addr, new.as_bytes(), ty)?;
+            Ok(old)
+        }
+        "atomic_fence" | "atomic_singlethreadfence" => Ok(Value::unit().clone()),
         "saturating_add" => saturating_add(intrinsic_type_arg(instance, 0)?, &args[0], &args[1]),
         "saturating_sub" => saturating_sub(intrinsic_type_arg(instance, 0)?, &args[0], &args[1]),
         _ => bail!("Unimplemented intrinsic `{name}` in `{}`", instance.name()),
     }
+}
+
+/// Compute the value an atomic read-modify-write stores, given the old value.
+///
+/// `T` is an integer or a pointer, which is an address-sized integer here. For
+/// a pointer, `operand` is a `usize` byte count, so the arithmetic is the same.
+/// Arithmetic wraps, as it does for the atomic types.
+fn atomic_rmw(name: &str, old: &Value, operand: &Value) -> Value {
+    let size = old.len();
+    let (lhs, rhs) = (old.read_uint(), operand.read_uint());
+    let result = match name {
+        "atomic_xchg" => rhs,
+        "atomic_xadd" => lhs.wrapping_add(rhs),
+        "atomic_xsub" => lhs.wrapping_sub(rhs),
+        "atomic_and" => lhs & rhs,
+        "atomic_nand" => !(lhs & rhs),
+        "atomic_or" => lhs | rhs,
+        "atomic_xor" => lhs ^ rhs,
+        "atomic_umax" => lhs.max(rhs),
+        "atomic_umin" => lhs.min(rhs),
+        // Signed comparisons need the operands sign-extended.
+        "atomic_max" | "atomic_min" => {
+            let (signed_lhs, signed_rhs) = (old.read_int(), operand.read_int());
+            let pick_lhs = (signed_lhs > signed_rhs) == (name == "atomic_max");
+            if pick_lhs { lhs } else { rhs }
+        }
+        _ => unreachable!("`{name}` is not an atomic read-modify-write"),
+    };
+    // Truncate back to the value's width, discarding any wrapped high bits.
+    Value::from_bytes(&result.to_le_bytes()[..size])
 }
 
 /// Evaluate a `saturating_add` intrinsic, dispatching on the operand type.

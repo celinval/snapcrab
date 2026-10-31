@@ -315,3 +315,77 @@ check_custom_start!(
     start_fn = "offset_from_unsigned_backwards",
     result = TestResult::ErrorRegex(r".*before `base`.*negative distance.*".to_string())
 );
+
+// --- Atomics ---
+
+check_custom_start!(
+    test_atomic_load_store,
+    input = "intrinsics/atomics.rs",
+    start_fn = "load_store",
+);
+
+check_custom_start!(
+    test_atomic_swap,
+    input = "intrinsics/atomics.rs",
+    start_fn = "swap",
+);
+
+check_custom_start!(
+    test_atomic_compare_exchange,
+    input = "intrinsics/atomics.rs",
+    start_fn = "compare_exchange",
+);
+
+check_custom_start!(
+    test_atomic_compare_exchange_weak,
+    input = "intrinsics/atomics.rs",
+    start_fn = "compare_exchange_weak",
+);
+
+check_custom_start!(
+    test_atomic_fetch_ops,
+    input = "intrinsics/atomics.rs",
+    start_fn = "fetch_ops",
+);
+
+check_custom_start!(
+    test_atomic_fetch_add_wraps,
+    input = "intrinsics/atomics.rs",
+    start_fn = "fetch_add_wraps",
+);
+
+check_custom_start!(
+    test_atomic_fetch_max_min_signed,
+    input = "intrinsics/atomics.rs",
+    start_fn = "fetch_max_min_signed",
+);
+
+check_custom_start!(
+    test_atomic_fetch_max_min_unsigned,
+    input = "intrinsics/atomics.rs",
+    start_fn = "fetch_max_min_unsigned",
+);
+
+check_custom_start!(
+    test_atomic_bool,
+    input = "intrinsics/atomics.rs",
+    start_fn = "atomic_bool",
+);
+
+check_custom_start!(
+    test_atomic_ptr,
+    input = "intrinsics/atomics.rs",
+    start_fn = "atomic_ptr",
+);
+
+check_custom_start!(
+    test_atomic_fences,
+    input = "intrinsics/atomics.rs",
+    start_fn = "fences",
+);
+
+check_custom_start!(
+    test_atomic_arc_refcount,
+    input = "intrinsics/atomics.rs",
+    start_fn = "arc_refcount",
+);

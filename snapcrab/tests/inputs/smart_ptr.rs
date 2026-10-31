@@ -107,15 +107,14 @@ pub fn ref_empty_slice_tail() {
     assert!(unsized_ref.tail.is_empty());
 }
 
-/// `Arc<T> -> Arc<dyn Trait>`. The coercion itself behaves like `Rc`'s, but
-/// `Arc` keeps its refcount in an atomic, so this currently stops at the
-/// unimplemented atomic intrinsics.
+/// `Arc<T> -> Arc<dyn Trait>`, which coerces like `Rc` but keeps its refcount
+/// in an atomic.
 pub fn arc_to_dyn() {
     let shape: Arc<dyn Shape> = Arc::new(Square(5));
     assert!(shape.area() == 25);
 }
 
-/// `Arc<[T; N]> -> Arc<[T]>`, blocked on the same atomic intrinsics.
+/// `Arc<[T; N]> -> Arc<[T]>`.
 pub fn arc_to_slice() {
     let slice: Arc<[u32]> = Arc::new([7u32, 8]);
     assert!(slice.len() == 2 && slice[1] == 8);

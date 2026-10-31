@@ -190,9 +190,7 @@ impl ArcRecv for ArcHeld {
     }
 }
 
-/// A `self: Arc<Self>` receiver. The `Arc<T> -> Arc<dyn _>` coercion works,
-/// but `Arc` keeps its refcount in an atomic, so dropping it needs the atomic
-/// intrinsics that are not implemented yet.
+/// A `self: Arc<Self>` receiver, so the call coerces `Arc<T> -> Arc<dyn _>`.
 pub fn recv_arc_self() {
     let d: Arc<dyn ArcRecv> = Arc::new(ArcHeld(42));
     assert!(d.value() == 42);
